@@ -1,0 +1,35 @@
+# CI-only override: swap the real Ollama for a deterministic in-process mock
+# (scripts/mock_ollama.py) so the whole container pipeline can run in CI without
+# pulling a multi-GB model. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm tools scripts/e2e_mail_check.py
+#
+# The mock is a keyword stub, NOT a model: the CI E2E proves the plumbing (request ->
+# tool call -> validated recipient -> SMTP -> Mailpit, correct Reply-To/headers) and
+# that the pipeline carries the chosen recipient to the To header. Real routing
+# accuracy is non-deterministic and is measured separately (docs/eval.md).
+services:
+  ollama:
+    # Plain Python image (same pinned digest as the Dockerfile) running the mock,
+    # instead of the real model server. No model is pulled.
+    image: python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
+    pull_policy: missing
+    volumes:
+      - ./scripts/mock_ollama.py:/mock_ollama.py:ro
+    entrypoint: ["python", "/mock_ollama.py"]
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    # The base healthcheck runs `ollama list`, which this image lacks; replace it
+    # with an HTTP probe of the mock's /api/tags.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:11434/api/tags', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 2s

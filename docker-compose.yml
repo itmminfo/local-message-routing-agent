@@ -1,0 +1,132 @@
+name: local-message-routing-agent
+
+services:
+  api:
+    build: .
+    image: local-message-routing-agent:latest
+    pull_policy: build
+    restart: unless-stopped
+    # Hardening: the API turns untrusted input into an email, so lock the container
+    # down. (ollama needs a writable model volume, so it is intentionally not
+    # read_only; this profile applies to the API only.)
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    mem_limit: 512m
+    pids_limit: 256
+    environment:
+      APP_NAME: ${APP_NAME:-Local Message Routing Agent}
+      API_PREFIX: ${API_PREFIX:-/api/v1}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-512}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@local-message-routing-agent.test}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-120}
+      MESSAGE_MAX_LENGTH: ${MESSAGE_MAX_LENGTH:-5000}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
+      MAX_CONCURRENT_ROUTE_REQUESTS: ${MAX_CONCURRENT_ROUTE_REQUESTS:-8}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-65536}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      mailpit:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  ollama:
+    # Default image works on both CPU and GPU (it bundles CUDA/ROCm), so a plain
+    # `docker compose up -d` is correct on any machine. On a CPU-only/low-bandwidth
+    # host you can opt into a much smaller CPU-only image, e.g.:
+    #   OLLAMA_IMAGE=alpine/ollama:latest docker compose up -d
+    # Do not combine a CPU-only image with docker-compose.gpu.yml (no GPU support).
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.24.0}
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ollama-init:
+    image: curlimages/curl:8.11.1
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_WAIT_TIMEOUT_SECONDS: ${OLLAMA_WAIT_TIMEOUT_SECONDS:-120}
+      OLLAMA_WARMUP_ENABLED: ${OLLAMA_WARMUP_ENABLED:-true}
+      OLLAMA_WARMUP_TIMEOUT_SECONDS: ${OLLAMA_WARMUP_TIMEOUT_SECONDS:-180}
+      OLLAMA_PULL_MAX_ATTEMPTS: ${OLLAMA_PULL_MAX_ATTEMPTS:-3}
+      OLLAMA_PULL_RETRY_DELAY_SECONDS: ${OLLAMA_PULL_RETRY_DELAY_SECONDS:-5}
+      OLLAMA_MODEL_EXPECTED_DIGEST: ${OLLAMA_MODEL_EXPECTED_DIGEST:-}
+    volumes:
+      - ./scripts/wait-for-ollama-and-pull-model.sh:/wait-for-ollama-and-pull-model.sh:ro
+    entrypoint: ["/bin/sh", "/wait-for-ollama-and-pull-model.sh"]
+    depends_on:
+      ollama:
+        condition: service_started
+
+  mailpit:
+    image: axllent/mailpit:v1.30.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    # Mailpit ships its own readiness probe, so no extra tooling is needed in the
+    # image. Gating api and tools on this (service_healthy) instead of
+    # service_started means they wait for a sink that actually accepts SMTP/HTTP,
+    # closing the start-up race where the container is up but not yet listening.
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+
+  # Optional diagnostics (E2E and routing-accuracy scripts) reusing the api image
+  # so verification needs only Docker, not Python on the host. Profiled, so a
+  # plain `docker compose up -d` never starts it. It talks to the other services
+  # over the compose network (api:8000, mailpit:8025), not localhost.
+  #   docker compose run --rm tools scripts/e2e_mail_check.py
+  tools:
+    build: .
+    image: local-message-routing-agent:latest
+    pull_policy: build
+    profiles: ["tools"]
+    environment:
+      API_BASE_URL: http://api:8000
+      MAIL_API_URL: http://mailpit:8025
+    entrypoint: ["python"]
+    depends_on:
+      api:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+volumes:
+  ollama-data:

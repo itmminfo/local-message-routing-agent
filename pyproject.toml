@@ -1,0 +1,18 @@
+# Tooling configuration only. Runtime dependencies live in requirements.txt so the
+# Dockerfile can install them with a simple `pip install -r requirements.txt`.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+# FastAPI uses `Depends(...)` as an argument default by design.
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app", "scripts", "tests"]
+strict = true
+plugins = ["pydantic.mypy"]

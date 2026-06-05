@@ -1,0 +1,20 @@
+# Optional GPU override for the Ollama service.
+#
+# Usage (opt-in, requires an NVIDIA GPU + nvidia-container-toolkit on the host):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# The base docker-compose.yml stays CPU-only on purpose, so the project runs
+# on any machine. This override only reserves the GPU for the Ollama service;
+# Ollama then offloads the model to the GPU automatically. The same model is
+# used either way.
+services:
+  ollama:
+    # Pin the CUDA-capable image regardless of OLLAMA_IMAGE: GPU offload needs it.
+    image: ollama/ollama:0.24.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

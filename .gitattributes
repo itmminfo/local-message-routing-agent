@@ -1,0 +1,5 @@
+# Normalize line endings in the repository and force LF for shell scripts.
+# The scripts run inside Linux containers (and are bind-mounted into them),
+# so they must never be checked out with CRLF, even on Windows clones.
+* text=auto
+*.sh text eol=lf
