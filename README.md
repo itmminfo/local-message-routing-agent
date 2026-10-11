@@ -502,7 +502,7 @@ W wersji produkcyjnej dodałbym:
 - produkcyjnego dostawcę SMTP i kontrolę dostarczalności
 - health checki dla wdrożenia oraz dobór zasobów pod wybrany model
 
-Te elementy wykraczają poza zakres minimalnego PoC przygotowanego do rekrutacji.
+Te elementy wykraczają poza zakres minimalnego PoC.
 
 ## Testy
 
