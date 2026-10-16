@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Actions are pinned by commit SHA; Dependabot bumps the SHA and the version comment.
+  # One grouped PR a month keeps the noise down. Python dependencies are covered by
+  # pip-audit in CI against the hashed lockfiles.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
