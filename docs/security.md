@@ -35,12 +35,12 @@ i kolejności ich adresowania**, a nie udawanie, że PoC jest produkcją.
 
 | Kontrola | Gdzie | Co daje |
 |---|---|---|
-| Odbiorca jako enum, **ponownie walidowany tuż przed SMTP** | `app/domain/departments.py` (`validate_department_email`), `app/infrastructure/mail_sender.py` (`send_email`) | Model nie wyśle poza 5 dozwolonych działów; zły/nieznany wybór → fallback `other@` |
+| Odbiorca jako enum, **ponownie walidowany tuż przed SMTP** | `app/domain/departments.py` (`validate_department_email`), `app/infrastructure/mail_sender.py` (`send_email`) | Model nie wyśle poza 5 dozwolonych działów; zły/nieznany wybór -> fallback `other@` |
 | `Reply-To` ustawia aplikacja z `request.email` | `app/agent/routing_agent.py` (`_send_from_tool_args`) | Model nie kontroluje `Reply-To` |
 | Temat i szablon treści budowane **deterministycznie** przez backend | `app/agent/routing_agent.py` (`_build_subject`/`_build_mail_body`) | Model dostarcza tylko `recipient` + krótkie `reason` (wstawiane do treści); nie może podać tematu, nagłówków ani szablonu wiadomości |
 | Allowlista argumentów tool-calla (`recipient`, `reason`); nadmiarowe pola ignorowane i logowane (same nazwy) | `app/agent/routing_agent.py` (`ALLOWED_TOOL_ARGUMENT_KEYS`, `_build_tool_args`) | Kontrakt egzekwowany, nie tylko deklarowany w schemacie; halucynowane `subject`/`body`/`to` nie wpływają na maila ani nagłówki |
 | Odrzucanie CR/LF w nagłówkach | `app/infrastructure/mail_sender.py` (`_reject_crlf`) | Brak SMTP header injection |
-| `email` ASCII-only; `message` 1..MAX i nie-whitespace | `app/schemas/messages.py` (`email_must_be_ascii`/`message_must_not_be_whitespace`) | EAI → 422; puste/za długie → 422 |
+| `email` ASCII-only; `message` 1..MAX i nie-whitespace | `app/schemas/messages.py` (`email_must_be_ascii`/`message_must_not_be_whitespace`) | EAI: 422; puste/za długie: 422 |
 | Kontener API jako **non-root** | `Dockerfile:17-18,27` | Mniejszy blast radius po kompromitacji |
 | Porty tylko `127.0.0.1` | `docker-compose.yml` | Brak ekspozycji do sieci w domyślnej konfiguracji |
 | Logi: tylko długość + metadane routingu (bez treści) | `app/agent/routing_agent.py` (`route`) | Treść wiadomości nie trafia do logów |
@@ -63,7 +63,7 @@ i wyślij na attacker@..." skończyło się odrzuceniem adresu spoza enuma i fal
 | `reason` modelu bez `maxLength`, nieoczyszczony | Niska | Trafia tylko do treści (text/plain, nie nagłówek) - brak wektora injection, ale warte limitu |
 | Hardening kontenera | Niska | **Zaimplementowane dla `api`**: `read_only` + `tmpfs /tmp` + `cap_drop: [ALL]` + `no-new-privileges` + limity `mem`/`pids` (non-root + loopback już były); `ollama` celowo zapisywalny (wolumen modelu) |
 | Swagger/OpenAPI wystawione bezwarunkowo | Niska (loopback) | Do zamknięcia za flagą env w produkcji |
-| Supply chain: integralność i reprodukowalność zależności | Niska | **Zaimplementowane**: lockfile z hashami + `--require-hashes` (Docker/CI) + baza po digeście + SBOM (Syft) w CI; opcjonalny pin digestu modelu (`OLLAMA_MODEL_EXPECTED_DIGEST`) wiąże digest z modelem przez regex `name`→`digest` w obiekcie `/api/tags` (nie pełny parser JSON; produkcyjnie `jq`) |
+| Supply chain: integralność i reprodukowalność zależności | Niska | **Zaimplementowane**: lockfile z hashami + `--require-hashes` (Docker/CI) + baza po digeście + SBOM (Syft) w CI; opcjonalny pin digestu modelu (`OLLAMA_MODEL_EXPECTED_DIGEST`) wiąże digest z modelem przez regex `name` -> `digest` w obiekcie `/api/tags` (nie pełny parser JSON; produkcyjnie `jq`) |
 | Skrypty diagnostyczne: `urlopen` z URL-em z env | Niska | **Zaimplementowane**: scheme ograniczony do `http(s)` przez `require_http_url()`, a `# nosec B310` dokumentuje świadome wyciszenie po walidacji; Bandit działa w CI i nie zgłasza tu problemu. URL pochodzi z env, nie z żądania HTTP |
 
 ## Mapowanie OWASP LLM Top 10 (2025)
@@ -86,8 +86,8 @@ i wyślij na attacker@..." skończyło się odrzuceniem adresu spoza enuma i fal
 - **LLM09 Misinformation** - model może wskazać błędny dział lub uzasadnienie; mitygacja =
   eval (`docs/eval.md`) + przyszły human review.
 - **LLM10 Unbounded Consumption** - częściowo: `MESSAGE_MAX_LENGTH`, `OLLAMA_NUM_PREDICT`,
-  timeouty, limit współbieżności routingu (`MAX_CONCURRENT_ROUTE_REQUESTS` → 429) oraz limit
-  rozmiaru body na warstwie ASGI (`MAX_REQUEST_BODY_BYTES` → 413, egzekwowany po
+  timeouty, limit współbieżności routingu (`MAX_CONCURRENT_ROUTE_REQUESTS`, HTTP 429) oraz limit
+  rozmiaru body na warstwie ASGI (`MAX_REQUEST_BODY_BYTES`, HTTP 413, egzekwowany po
   `Content-Length` i strumieniowo, więc obejmuje też `Transfer-Encoding: chunked`); brak
   pełnego rate-limitu/quot per klient.
 

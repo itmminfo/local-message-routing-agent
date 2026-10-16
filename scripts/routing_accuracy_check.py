@@ -90,7 +90,7 @@ HELD_OUT_CASES = [
 ]
 
 # Boundary cases: the task intentionally leaves these overlaps undefined, so more
-# than one recipient is defensible. They probe the exact seams the recruiters made
+# than one recipient is defensible. They probe the exact seams the task author made
 # similar on purpose; any recipient in the acceptable set counts as resolved and
 # none counts as a failure.
 BOUNDARY_CASES: list[tuple[str, tuple[str, ...]]] = [

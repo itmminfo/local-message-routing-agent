@@ -3,6 +3,23 @@
 Konteneryzowany prototyp wewnętrznego routera wiadomości wykorzystującego lokalny
 model AI.
 
+Projekt powstał w czerwcu 2026 jako zadanie techniczne w procesie rekrutacyjnym.
+Specyfikacja zostawiała kilka rzeczy otwartych. Jak je rozstrzygnąłem, opisuję w
+sekcjach "Założenia domenowe" i "Decyzje architektoniczne".
+
+## W skrócie
+
+- Lokalny model (`qwen2.5:3b` w Ollamie) wybiera dział przez function calling, a
+  backend waliduje wybór i wysyła e-mail do Mailpita. Całość startuje przez
+  `docker compose up -d`.
+- Model decyduje tylko o dziale. Odbiorcę z allowlisty, `Reply-To`, temat i treść
+  ustawia backend, więc prompt injection nie wyśle wiadomości poza dozwolone adresy.
+- Trafność zmierzona na zbiorze spoza promptu: 13/14 ([`docs/eval.md`](docs/eval.md)).
+- Model zagrożeń z mapowaniem na OWASP LLM Top 10
+  ([`docs/security.md`](docs/security.md)).
+- CI: ruff, `mypy --strict`, ponad 150 testów, pip-audit, bandit, build z lockfile'a
+  z hashami, SBOM i test E2E całego stosu w Compose (z mockiem Ollamy).
+
 ## Cel
 
 Usługa przyjmuje adres e-mail nadawcy i treść wiadomości, a następnie przekazuje je
@@ -233,8 +250,8 @@ routingu, odczytuje Mailpit przez jego API HTTP i weryfikuje dwie rzeczy:
 1. **Kontrakt dostarczania** (zawsze): pojawiła się nowa wiadomość, `Reply-To` zgadza
    się z adresem nadawcy, `To` jest dokładnie jednym z dozwolonych odbiorców-działów,
    a przechwycony adres `To` w Mailpit zgadza się z odbiorcą z odpowiedzi API.
-2. **Poprawność routingu** (jeden jednoznaczny przypadek): domyślnie „Nie działa mi
-   komputer" musi trafić do `help-desk@example.com` — sprawdzane i w odpowiedzi API,
+2. **Poprawność routingu** (jeden jednoznaczny przypadek): domyślnie "Nie działa mi
+   komputer" musi trafić do `help-desk@example.com`, sprawdzane i w odpowiedzi API,
    i w przechwyconym nagłówku `To`. Dzięki temu błędny routing (np. do `it@` albo do
    awaryjnego `other@`) **oblewa** test, zamiast przejść tylko dlatego, że użyto
    *jakiegokolwiek* dozwolonego adresu. To celowo przypadek in-prompt, więc model z
@@ -304,14 +321,14 @@ Reguły graniczne są utrzymywane w `BOUNDARY_RULES` w
 Dwie granice wymagały samodzielnego rozstrzygnięcia:
 
 - **`human-resources@` / `kadry@`**: podział na miękki HR i administrację kadrową.
-  Rekrutacja, onboarding, benefity, rozwój i informacja zwrotna → HR; urlopy, L4,
-  płace, umowy, dokumenty pracownicze i ewidencja czasu pracy → kadry. Gdy oba
-  wątki współistnieją, pierwszeństwo ma administracja kadrowa, ponieważ niesie
-  konkretne działanie formalne.
+  Rekrutacja, onboarding, benefity, rozwój i informacja zwrotna trafiają do HR;
+  urlopy, L4, płace, umowy, dokumenty pracownicze i ewidencja czasu pracy do kadr.
+  Gdy oba wątki współistnieją, pierwszeństwo ma administracja kadrowa, ponieważ
+  niesie konkretne działanie formalne.
 - **`help-desk@` / `it@`**: podział na sprzęt użytkownika oraz systemy i dostępy.
-  Komputer, laptop, monitor, drukarka i lokalne stanowisko → help-desk; logowanie,
-  konta, uprawnienia, aplikacje, platformy, API i błędy oprogramowania → IT. Przy
-  wiadomości mieszanej decyduje dominujący, możliwy do wykonania problem.
+  Komputer, laptop, monitor, drukarka i lokalne stanowisko trafiają do help-desk;
+  logowanie, konta, uprawnienia, aplikacje, platformy, API i błędy oprogramowania
+  do IT. Przy wiadomości mieszanej decyduje dominujący, możliwy do wykonania problem.
 
 Dozwoleni odbiorcy (zakres przyjęty w tym PoC):
 
@@ -556,9 +573,9 @@ analiza bezpieczeństwa kodu) przy każdym pushu i pull requeście
 Dodatkowo osobny job `e2e-compose` stawia pełny stos przez Compose i przejeżdża test
 E2E, ale podmienia Ollamę na deterministyczny mock (`scripts/mock_ollama.py`,
 override `docker-compose.ci.yml`), żeby nie pobierać wielogigabajtowego modelu w CI.
-Dowodzi to **przepływu kontenerowego** (żądanie → wywołanie narzędzia → walidacja
-odbiorcy → SMTP → Mailpit, z `/ready` i poprawnymi nagłówkami), a **nie** trafności
-modelu — ta jest niedeterministyczna i mierzona osobno (zob. [`docs/eval.md`](docs/eval.md)).
+Dowodzi to **przepływu kontenerowego** (żądanie -> wywołanie narzędzia -> walidacja
+odbiorcy -> SMTP -> Mailpit, z `/ready` i poprawnymi nagłówkami), a **nie** trafności
+modelu. Ta jest niedeterministyczna i mierzona osobno (zob. [`docs/eval.md`](docs/eval.md)).
 Ten sam przepływ można odtworzyć lokalnie:
 
 ```bash
