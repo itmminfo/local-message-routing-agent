@@ -2,8 +2,10 @@ import importlib.util
 import os
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 from app.domain.departments import ALLOWED_RECIPIENTS
@@ -20,10 +22,6 @@ def load_module() -> ModuleType:
     return module
 
 
-def read_script() -> str:
-    return SCRIPT_PATH.read_text(encoding="utf-8")
-
-
 def test_e2e_mail_check_imports_and_reuses_domain_recipients() -> None:
     module = load_module()
 
@@ -32,46 +30,144 @@ def test_e2e_mail_check_imports_and_reuses_domain_recipients() -> None:
     assert module.ALLOWED_RECIPIENTS == ALLOWED_RECIPIENTS
 
 
-def test_e2e_mail_check_uses_api_and_mailpit_endpoints() -> None:
-    script = read_script()
+def install_fake_stack(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    route_changes: dict[str, Any] | None = None,
+    mail_changes: dict[str, Any] | None = None,
+) -> list[str]:
+    """Exercise main against fake HTTP boundaries, including call order and Mailpit body."""
+    calls: list[str] = []
+    mail_reads = 0
+    reason = "Wiadomość dotyczy niedziałającego komputera."
+    route_response: dict[str, Any] = {
+        "status": "sent",
+        "recipient": module.EXPECTED_RECIPIENT,
+        "reason": reason,
+        "used_fallback": False,
+    }
+    if route_changes:
+        route_response.update(route_changes)
+    recipient = route_response["recipient"]
+    label = "Przekierowanie awaryjne" if route_response["used_fallback"] else "Uzasadnienie (AI)"
+    mail_detail: dict[str, Any] = {
+        "To": [{"Address": recipient}],
+        "ReplyTo": [{"Address": module.SENDER_EMAIL}],
+        "Text": (
+            "Automatyczne skierowanie zgłoszenia przez agenta AI.\n\n"
+            f"Nadawca: {module.SENDER_EMAIL}\nDział docelowy: {recipient}\n\n"
+            f"Treść zgłoszenia:\n{module.ROUTE_MESSAGE}\n\n"
+            f"{label}: {route_response['reason']}\n"
+        ),
+    }
+    if mail_changes:
+        mail_detail.update(mail_changes)
 
-    assert "/api/v1/messages/route" in script
-    assert "/api/v1/messages?limit=50" in script
-    assert "/api/v1/message/{message_id}" in script
+    def fake_ready() -> None:
+        calls.append("ready")
+
+    def fake_request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
+        nonlocal mail_reads
+        calls.append(f"{method} {url}")
+        if method == "GET" and url == f"{module.MAIL_API_URL}{module.MESSAGES_PATH}":
+            mail_reads += 1
+            return {"messages": [] if mail_reads == 1 else [{"ID": "new-message"}]}
+        if method == "POST" and url == f"{module.API_BASE_URL}{module.ROUTE_PATH}":
+            assert payload == {"email": module.SENDER_EMAIL, "message": module.ROUTE_MESSAGE}
+            return route_response
+        if method == "GET" and url == f"{module.MAIL_API_URL}/api/v1/message/new-message":
+            return mail_detail
+        raise AssertionError(f"Unexpected request: {method} {url}")
+
+    monkeypatch.setattr(module, "wait_for_ready", fake_ready)
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+    return calls
 
 
-def test_e2e_mail_check_validates_delivery_contract() -> None:
-    script = read_script()
-
-    assert "from app.domain.departments import ALLOWED_RECIPIENTS" in script
-    assert 'status") != "sent"' in script
-    assert "api_recipient not in ALLOWED_RECIPIENTS" in script
-    assert "ReplyTo" in script
-    assert "to_addresses[0] != api_recipient" in script
-
-
-def test_e2e_mail_check_asserts_routing_correctness() -> None:
-    script = read_script()
-
-    # The unambiguous case routes to a specific department, checked on both the API
-    # response and the captured Mailpit To, not merely "some allowed recipient".
-    assert "EXPECTED_RECIPIENT" in script
-    assert "Nie działa mi komputer" in script
-    assert "help-desk@example.com" in script
-    assert "api_recipient != EXPECTED_RECIPIENT" in script
-    assert "to_addresses[0] != EXPECTED_RECIPIENT" in script
-
-
-def test_e2e_mail_check_waits_for_ready_before_routing() -> None:
+def test_e2e_main_waits_for_ready_and_checks_api_and_delivered_mail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = load_module()
-    script = read_script()
+    calls = install_fake_stack(module, monkeypatch)
 
-    assert callable(module.wait_for_ready)
-    assert callable(module.probe_ready)
-    assert "/ready" in script
-    assert 'status") == "ready"' in script
-    # The /ready wait must run before the route request is sent.
-    assert script.index("wait_for_ready()") < script.index("{API_BASE_URL}{ROUTE_PATH}")
+    assert module.main() == 0
+    assert calls == [
+        "ready",
+        f"GET {module.MAIL_API_URL}{module.MESSAGES_PATH}",
+        f"POST {module.API_BASE_URL}{module.ROUTE_PATH}",
+        f"GET {module.MAIL_API_URL}{module.MESSAGES_PATH}",
+        f"GET {module.MAIL_API_URL}/api/v1/message/new-message",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mail_changes", "error"),
+    [
+        ({"Text": ""}, "non-empty text body"),
+        ({"Text": "Treść zgłoszenia:\ninna wiadomość\n\n"}, "original message"),
+        (
+            {"Text": "Treść zgłoszenia:\nNie działa mi komputer\n\nUzasadnienie (AI): błędne"},
+            "correctly labelled routing reason",
+        ),
+        ({"ReplyTo": [{"Address": "wrong@example.com"}]}, "Reply-To is incorrect"),
+        ({"To": [{"Address": "it@example.com"}]}, "Mailpit To does not match"),
+    ],
+)
+def test_e2e_main_rejects_corrupt_mailpit_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mail_changes: dict[str, Any],
+    error: str,
+) -> None:
+    module = load_module()
+    install_fake_stack(module, monkeypatch, mail_changes=mail_changes)
+
+    with pytest.raises(SystemExit):
+        module.main()
+
+    assert error in capsys.readouterr().err
+
+
+def test_e2e_main_rejects_wrong_allowed_api_recipient(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_module()
+    install_fake_stack(module, monkeypatch, route_changes={"recipient": "it@example.com"})
+
+    with pytest.raises(SystemExit):
+        module.main()
+
+    assert "expected 'help-desk@example.com'" in capsys.readouterr().err
+
+
+def test_e2e_main_accepts_correct_fallback_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_module()
+    monkeypatch.setattr(module, "EXPECTED_RECIPIENT", "other@example.com")
+    install_fake_stack(
+        module,
+        monkeypatch,
+        route_changes={"used_fallback": True, "reason": "Model nie wywołał narzędzia."},
+    )
+
+    assert module.main() == 0
+
+
+@pytest.mark.parametrize(
+    ("route_message", "reason"),
+    [
+        ("Nie działa mi komputer\r\nDrukarka nie drukuje", "Problem ze sprzętem."),
+        ("Nie działa mi komputer", "Problem ze sprzętem.\r\nWymaga pomocy."),
+    ],
+)
+def test_e2e_main_accepts_mailpit_newline_normalization(
+    monkeypatch: pytest.MonkeyPatch, route_message: str, reason: str
+) -> None:
+    module = load_module()
+    monkeypatch.setattr(module, "ROUTE_MESSAGE", route_message)
+    install_fake_stack(module, monkeypatch, route_changes={"reason": reason})
+
+    assert module.main() == 0
 
 
 def test_e2e_mail_check_expected_recipient_default_is_allowed() -> None:
@@ -88,13 +184,19 @@ def test_probe_ready_handles_closed_port_without_raising() -> None:
 
 
 def test_e2e_mail_check_timeout_is_configurable_and_not_hardcoded() -> None:
-    script = read_script()
+    module = load_module()
+    seen: list[int] = []
 
-    assert "REQUEST_TIMEOUT_SECONDS" in script
-    assert "timeout=REQUEST_TIMEOUT_SECONDS" in script
-    assert "timeout=30" not in script
-    # Network failures (refused/timeout/reset) are handled, not surfaced raw.
-    assert "except OSError" in script
+    def fake_urlopen(_request: Any, *, timeout: int) -> Any:
+        seen.append(timeout)
+        raise urllib.error.URLError("connection refused")
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(module.urllib.request, "urlopen", fake_urlopen)
+        with pytest.raises(SystemExit):
+            module.request_json("GET", "http://localhost:8000/health")
+
+    assert seen == [module.REQUEST_TIMEOUT_SECONDS]
 
 
 def test_e2e_mail_check_reports_unreachable_api_without_traceback() -> None:

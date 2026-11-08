@@ -65,10 +65,16 @@ class MessageRouteResponse(BaseModel):
     recipient: DepartmentEmail
     reply_to: EmailStr
     subject: str
-    reason: str
+    reason: str = Field(description="Uzasadnienie modelu lub opis fallbacku dodany przez backend.")
     used_fallback: bool
     model: str
-    routing_confidence: Literal["high", "low"]
+    routing_confidence: Literal["high", "low"] = Field(
+        description=(
+            "Sygnał techniczny: high oznacza konkretny dozwolony adresat bez "
+            "fallbacku; low oznacza other lub fallback. Nie jest to prawdopodobieństwo "
+            "poprawnej klasyfikacji."
+        )
+    )
 
 
 class ErrorResponse(BaseModel):

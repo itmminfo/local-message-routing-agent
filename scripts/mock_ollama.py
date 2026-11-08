@@ -120,6 +120,7 @@ KEYWORD_ROUTING: list[tuple[str, tuple[str, ...]]] = [
 def _fold(text: str) -> str:
     # Strip Polish diacritics and lower-case so keyword matching is robust to "działa"
     # vs "dziala" and to capitalization.
+    text = text.replace("ł", "l").replace("Ł", "L")
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
 
 

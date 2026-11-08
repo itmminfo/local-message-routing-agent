@@ -1,5 +1,5 @@
-# Tooling configuration only. Runtime dependencies live in requirements.txt so the
-# Dockerfile can install them with a simple `pip install -r requirements.txt`.
+# Tooling configuration only. Dependencies live in requirements*.txt and are pinned
+# with hashes in requirements*.lock, which the Dockerfile and CI install from.
 
 [tool.ruff]
 target-version = "py312"

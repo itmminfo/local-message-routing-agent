@@ -10,10 +10,13 @@ from app.domain.departments import ALLOWED_RECIPIENTS, DepartmentEmail
 
 RETRY_INSTRUCTION = "You must call the send_email tool exactly once. Do not answer in plain text."
 
-DEFAULT_REASON = "No routing reason was provided by the AI agent."
+# User-facing texts (API `reason` and the email body) are Polish, like the email
+# template; log messages stay English.
+DEFAULT_REASON = "Model nie podał uzasadnienia."
 
 # Backend consumes exactly recipient+reason and ignores any other key the model may
-# emit (e.g. subject/body/to), logging the names so the drift is visible.
+# emit (e.g. subject/body/to). Extra keys are counted without logging their names:
+# model-generated keys may themselves contain private message content.
 ALLOWED_TOOL_ARGUMENT_KEYS = frozenset({"recipient", "reason"})
 
 logger = logging.getLogger(__name__)
@@ -70,8 +73,8 @@ class SendEmailToolArgs:
     recipient: str
     reason: str
     reason_defaulted: bool = False
-    # Sorted names of out-of-contract arguments, for logging only; never affect the email.
-    extra_fields: tuple[str, ...] = ()
+    # Never retain model-generated key names, which may contain message content.
+    extra_field_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -129,11 +132,11 @@ class RoutingAgent:
             )
 
         logger.info("Valid send_email tool call found recipient=%s", tool_args.recipient)
-        if tool_args.extra_fields:
-            # Out-of-contract keys: routing stands, log names only (values are untrusted).
+        if tool_args.extra_field_count:
+            # Model-generated keys and values are untrusted and may contain message data.
             logger.warning(
-                "send_email tool call included unsupported arguments ignored=%s",
-                list(tool_args.extra_fields),
+                "send_email tool call included unsupported arguments ignored_count=%d",
+                tool_args.extra_field_count,
             )
         if tool_args.reason_defaulted:
             # Valid recipient but no usable reason -> DEFAULT_REASON. Not a fallback;
@@ -166,6 +169,7 @@ class RoutingAgent:
             recipient=tool_args.recipient,
             original_message=message,
             reason=tool_args.reason,
+            used_fallback=used_fallback,
         )
 
         self.mail_sender.send_email(
@@ -224,7 +228,7 @@ class RoutingAgent:
         if not tool_calls:
             return SendEmailToolParseResult(
                 tool_args=None,
-                invalid_reason="The AI agent did not return any tool calls.",
+                invalid_reason="Model nie wywołał żadnego narzędzia.",
                 category=FallbackCategory.NO_TOOL_CALLS,
             )
 
@@ -233,7 +237,7 @@ class RoutingAgent:
         # useful in the fallback log than "no send_email call at all".
         last_error = SendEmailToolParseResult(
             tool_args=None,
-            invalid_reason="The AI agent did not return a send_email tool call.",
+            invalid_reason="Model nie wywołał narzędzia send_email.",
             category=FallbackCategory.MISSING_SEND_EMAIL_TOOL,
         )
         for tool_call in tool_calls:
@@ -244,7 +248,7 @@ class RoutingAgent:
             if arguments is None:
                 last_error = SendEmailToolParseResult(
                     tool_args=None,
-                    invalid_reason="The AI agent returned malformed send_email arguments.",
+                    invalid_reason="Model zwrócił niepoprawne argumenty send_email.",
                     category=FallbackCategory.MALFORMED_ARGUMENTS,
                 )
                 continue
@@ -309,7 +313,7 @@ class RoutingAgent:
         if not isinstance(recipient, str) or not recipient.strip():
             return SendEmailToolParseResult(
                 tool_args=None,
-                invalid_reason="The AI agent returned a blank send_email recipient.",
+                invalid_reason="Model nie wskazał odbiorcy.",
                 category=FallbackCategory.BLANK_RECIPIENT,
             )
 
@@ -317,9 +321,7 @@ class RoutingAgent:
         if recipient not in ALLOWED_RECIPIENTS:
             return SendEmailToolParseResult(
                 tool_args=None,
-                invalid_reason=(
-                    f"The AI agent selected an invalid send_email recipient: {recipient}."
-                ),
+                invalid_reason=f"Model wskazał odbiorcę spoza listy: {recipient}.",
                 category=FallbackCategory.INVALID_RECIPIENT,
             )
 
@@ -332,13 +334,13 @@ class RoutingAgent:
         else:
             reason = DEFAULT_REASON
             reason_defaulted = True
-        extra_fields = tuple(sorted(set(arguments) - ALLOWED_TOOL_ARGUMENT_KEYS))
+        extra_field_count = len(set(arguments) - ALLOWED_TOOL_ARGUMENT_KEYS)
         return SendEmailToolParseResult(
             tool_args=SendEmailToolArgs(
                 recipient=recipient,
                 reason=reason,
                 reason_defaulted=reason_defaulted,
-                extra_fields=extra_fields,
+                extra_field_count=extra_field_count,
             )
         )
 
@@ -352,7 +354,11 @@ class RoutingAgent:
         recipient: str,
         original_message: str,
         reason: str,
+        used_fallback: bool,
     ) -> str:
+        # On a fallback the reason is the backend's description of the failed tool call,
+        # not the model's justification, so it must not be labelled as coming from the AI.
+        reason_label = "Przekierowanie awaryjne" if used_fallback else "Uzasadnienie (AI)"
         return "\n".join(
             [
                 "Automatyczne skierowanie zgłoszenia przez agenta AI.",
@@ -363,6 +369,6 @@ class RoutingAgent:
                 "Treść zgłoszenia:",
                 original_message,
                 "",
-                f"Uzasadnienie (AI): {reason}",
+                f"{reason_label}: {reason}",
             ]
         )
