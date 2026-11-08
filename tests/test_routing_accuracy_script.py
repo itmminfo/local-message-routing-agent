@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -176,6 +177,9 @@ def test_held_out_cases_do_not_overlap_prompt() -> None:
     from app.domain.routing_policy import ROUTING_EXAMPLES
 
     def fold(text: str) -> str:
+        # NFKD has no decomposition for "ł", so encoding to ASCII would drop it
+        # ("działa" -> "dziaa") instead of mapping it to "l".
+        text = text.replace("ł", "l").replace("Ł", "L")
         return (
             unicodedata.normalize("NFKD", text)
             .encode("ascii", "ignore")
@@ -183,6 +187,9 @@ def test_held_out_cases_do_not_overlap_prompt() -> None:
             .lower()
             .strip()
         )
+
+    # The guard itself must treat an ASCII-typed copy of a prompt example as a leak.
+    assert fold("Nie działa mi komputer") == fold("Nie dziala mi komputer")
 
     module = load_module()
     prompt = {fold(message) for message, _ in ROUTING_EXAMPLES}
@@ -238,3 +245,60 @@ def test_run_held_out_cases_reports_misses_and_fallbacks(
     assert "[FALLBACK" in out
     assert f"Hits: {total - 2}/{total}" in out
     assert f"Fallbacks: 1/{total}" in out
+
+
+def test_challenge_cases_are_balanced_and_do_not_repeat_prompt_examples() -> None:
+    import unicodedata
+
+    from app.domain.routing_policy import ROUTING_EXAMPLES
+
+    module = load_module()
+    cases = module.CHALLENGE_CASES
+
+    assert Counter(category for category, _message, _recipient in cases) == {
+        "paraphrase_pl": 10,
+        "english": 5,
+        "competing_cue": 5,
+        "injection": 5,
+    }
+    assert Counter(recipient for _category, _message, recipient in cases) == dict.fromkeys(
+        ALLOWED_RECIPIENTS, 5
+    )
+
+    def fold(text: str) -> str:
+        text = text.replace("ł", "l").replace("Ł", "L")
+        return (
+            unicodedata.normalize("NFKD", text)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+            .lower()
+            .strip()
+        )
+
+    prompt = {fold(message) for message, _recipient in ROUTING_EXAMPLES}
+    challenge = [fold(message) for _category, message, _recipient in cases]
+    assert len(challenge) == len(set(challenge))
+    assert set(challenge).isdisjoint(prompt)
+
+
+def test_challenge_report_compares_model_with_fixed_keyword_baseline(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_module()
+    expected_by_message = {
+        message: recipient for _category, message, recipient in module.CHALLENGE_CASES
+    }
+    first_message = module.CHALLENGE_CASES[0][1]
+
+    def fake_route_message(message: str) -> dict[str, object]:
+        if message == first_message:
+            return {"recipient": "other@example.com", "used_fallback": True}
+        return {"recipient": expected_by_message[message], "used_fallback": False}
+
+    monkeypatch.setattr(module, "route_message", fake_route_message)
+    module.run_challenge_cases()
+
+    out = capsys.readouterr().out
+    assert "Challenge total: model=24/25 baseline=5/25 fallbacks=1/25" in out
+    assert "competing_cue: model=" in out
+    assert "injection: model=" in out

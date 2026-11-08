@@ -94,6 +94,10 @@ def test_route_message_wires_real_agent_ollama_client_and_mail_sender() -> None:
     assert message["To"] == "help-desk@example.com"
     assert message["Reply-To"] == "jan.nowak@example.com"
     assert message["From"] == "no-reply@local-message-routing-agent.test"
+    assert (
+        "Treść zgłoszenia:\nNie działa mi komputer\n\n"
+        "Uzasadnienie (AI): The message concerns a computer issue."
+    ) in message.get_content()
 
 
 def test_route_message_falls_back_to_other_when_model_returns_no_tool_call() -> None:
@@ -137,3 +141,7 @@ def test_route_message_falls_back_to_other_when_model_returns_no_tool_call() -> 
     message = smtp.send_message.call_args.args[0]
     assert message["To"] == "other@example.com"
     assert message["Reply-To"] == "jan.nowak@example.com"
+    content = message.get_content()
+    assert "Treść zgłoszenia:\nNie działa mi komputer\n\n" in content
+    assert "Przekierowanie awaryjne: Model nie wywołał żadnego narzędzia." in content
+    assert "Uzasadnienie (AI):" not in content

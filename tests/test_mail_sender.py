@@ -49,6 +49,7 @@ def test_reply_to_header_equals_original_sender_email() -> None:
     assert message["To"] == "help-desk@example.com"
     assert message["From"] == "no-reply@local-message-routing-agent.test"
     assert message["Subject"] == "Message routed to help-desk"
+    assert message.get_content() == "Nie działa mi komputer\n"
 
 
 def test_invalid_recipient_raises_before_smtp_connection() -> None:
