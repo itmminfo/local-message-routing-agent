@@ -34,6 +34,7 @@ def test_mock_classifies_unambiguous_messages() -> None:
     assert module.classify("Aplikacja zwraca błąd 500") == "it@example.com"
     assert module.classify("Mam pytanie o proces rekrutacji") == "human-resources@example.com"
     assert module.classify("Gdzie mogę zaparkować rower") == "other@example.com"
+    assert module.classify("Pytanie o wypłatę") == "kadry@example.com"
 
 
 def test_mock_chat_response_uses_last_user_message_not_system() -> None:

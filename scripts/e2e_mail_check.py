@@ -6,8 +6,9 @@ so a cold or still-starting stack does not race the request. Then sends one rout
 request, reads Mailpit through its HTTP API, and verifies two distinct things:
 
 1. Delivery contract (always): a new message appeared, Reply-To matches the sender
-   email, To is exactly one allowed department recipient, and the captured Mailpit
-   recipient matches the API response recipient.
+   email, To is exactly one allowed department recipient, the captured Mailpit
+   recipient matches the API response recipient, and the text body contains the
+   original message and correctly labelled routing reason.
 2. Routing correctness (one unambiguous case): the message routes to the EXPECTED
    recipient, in both the API response and the captured Mailpit To header. This
    catches a regression that misroutes (e.g. to it@ or the other@ fallback) instead
@@ -56,6 +57,12 @@ MESSAGE_DETAIL_PATH = "/api/v1/message/{message_id}"
 def fail(message: str) -> NoReturn:
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def normalize_newlines(value: str) -> str:
+    # EmailMessage and Mailpit normalize body line endings independently of the
+    # original API payload. Compare equivalent text instead of raw CRLF bytes.
+    return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
 _ALLOWED_URL_SCHEMES = ("http", "https")
@@ -243,11 +250,28 @@ def main() -> int:
             f"expected recipient {EXPECTED_RECIPIENT!r}."
         )
 
+    mail_text = detail.get("Text")
+    if not isinstance(mail_text, str) or not mail_text.strip():
+        fail("Mailpit did not capture a non-empty text body.")
+    mail_text = normalize_newlines(mail_text)
+    original_message = normalize_newlines(ROUTE_MESSAGE)
+    if f"Treść zgłoszenia:\n{original_message}\n\n" not in mail_text:
+        fail("Mailpit text body does not contain the original message in its template.")
+
+    reason = route_response.get("reason")
+    used_fallback = route_response.get("used_fallback")
+    if not isinstance(reason, str) or not reason.strip() or not isinstance(used_fallback, bool):
+        fail("API response does not include a usable reason and fallback status.")
+    reason_label = "Przekierowanie awaryjne" if used_fallback else "Uzasadnienie (AI)"
+    if not mail_text.rstrip("\n").endswith(f"{reason_label}: {normalize_newlines(reason)}"):
+        fail("Mailpit text body does not end with the correctly labelled routing reason.")
+
     print(f"Message: {ROUTE_MESSAGE}")
     print(f"Expected recipient: {EXPECTED_RECIPIENT}")
     print(f"API recipient: {api_recipient}")
     print(f"Mailpit recipient: {to_addresses[0]}")
     print(f"Reply-To: {reply_to_addresses[0]}")
+    print("Mailpit text body: OK")
     print("Routing correctness: OK")
     return 0
 

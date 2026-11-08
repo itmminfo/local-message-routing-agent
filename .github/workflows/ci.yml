@@ -11,7 +11,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -47,6 +47,13 @@ jobs:
       - name: Build image (verifies the hashed lockfile installs)
         run: docker build -t local-message-routing-agent:ci .
 
+      - name: Check runtime image contains only application inputs
+        run: >-
+          docker run --rm --entrypoint sh local-message-routing-agent:ci -c
+          'test -f /app/app/main.py && test -f /app/scripts/e2e_mail_check.py &&
+          test ! -e /app/tests && test ! -e /app/README.md &&
+          test ! -e /app/SECURITY.md && test ! -e /app/.env'
+
       - name: Generate SBOM (Syft) for the built image
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
@@ -59,7 +66,7 @@ jobs:
     # plumbing proof, not a model-accuracy check (accuracy: docs/eval.md).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate CI Compose config
         run: docker compose -f docker-compose.yml -f docker-compose.ci.yml config -q

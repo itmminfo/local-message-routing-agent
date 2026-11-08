@@ -155,7 +155,7 @@ def test_build_tool_args_ignores_unknown_arguments() -> None:
     assert result.tool_args.reason == "Computer issue."
     # The out-of-contract keys are dropped from routing but surfaced (names only,
     # sorted) so the contract violation can be logged.
-    assert result.tool_args.extra_fields == ("extra", "subject", "to")
+    assert result.tool_args.extra_field_count == 3
 
 
 def test_build_tool_args_strips_reason_whitespace() -> None:
@@ -388,10 +388,15 @@ def test_invalid_recipient_triggers_retry_then_fallback_if_retry_fails() -> None
     assert len(ollama_client.calls) == 2
     assert mail_sender.sent[0]["to"] == "other@example.com"
     assert result.recipient == "other@example.com"
-    assert result.reason == (
-        "The AI agent selected an invalid send_email recipient: attacker@example.com."
-    )
+    assert result.reason == "Model wskazał odbiorcę spoza listy: attacker@example.com."
     assert result.used_fallback is True
+    # The fallback reason is written by the backend, so the body must not attribute it
+    # to the model.
+    body = mail_sender.sent[0]["body"]
+    assert (
+        "Przekierowanie awaryjne: Model wskazał odbiorcę spoza listy: attacker@example.com." in body
+    )
+    assert "Uzasadnienie (AI)" not in body
 
 
 def test_malformed_tool_args_trigger_retry_then_fallback_if_retry_fails() -> None:
@@ -410,7 +415,7 @@ def test_malformed_tool_args_trigger_retry_then_fallback_if_retry_fails() -> Non
     assert len(ollama_client.calls) == 2
     assert mail_sender.sent[0]["to"] == "other@example.com"
     assert result.recipient == "other@example.com"
-    assert result.reason == "The AI agent returned malformed send_email arguments."
+    assert result.reason == "Model zwrócił niepoprawne argumenty send_email."
     assert result.used_fallback is True
 
 
@@ -445,7 +450,7 @@ def test_blank_optional_args_are_filled_with_defaults_and_send() -> None:
     assert mail_sender.sent[0]["to"] == "help-desk@example.com"
     assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: help-desk@example.com"
     assert result.recipient == "help-desk@example.com"
-    assert result.reason == "No routing reason was provided by the AI agent."
+    assert result.reason == "Model nie podał uzasadnienia."
     assert result.used_fallback is False
 
 
@@ -462,7 +467,7 @@ def test_recipient_only_tool_call_fills_defaults_and_sends() -> None:
     assert len(ollama_client.calls) == 1
     assert mail_sender.sent[0]["to"] == "it@example.com"
     assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: it@example.com"
-    assert result.reason == "No routing reason was provided by the AI agent."
+    assert result.reason == "Model nie podał uzasadnienia."
     assert result.recipient == "it@example.com"
     assert result.used_fallback is False
 
@@ -538,7 +543,7 @@ def test_blank_recipient_triggers_retry_then_fallback_if_retry_fails() -> None:
     assert len(ollama_client.calls) == 2
     assert mail_sender.sent[0]["to"] == "other@example.com"
     assert result.recipient == "other@example.com"
-    assert result.reason == "The AI agent returned a blank send_email recipient."
+    assert result.reason == "Model nie wskazał odbiorcy."
     assert result.used_fallback is True
 
 
@@ -716,17 +721,17 @@ def test_extra_tool_argument_values_never_reach_the_email() -> None:
         assert "SECRET-LEAK-PAYLOAD" not in sent[field]
 
 
-def test_extra_tool_arguments_log_field_names_not_values(
+def test_extra_tool_arguments_log_count_without_names_or_values(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # The contract violation is logged for observability, but only the field NAMES
-    # (sorted), never the untrusted values, which could carry message content.
+    # The model may copy message content into a JSON key, so even an extra field
+    # name is untrusted data and must not reach logs.
     agent, _ollama_client, _mail_sender = make_agent(
         [
             tool_response(
                 recipient="it@example.com",
                 reason="Problem z aplikacją.",
-                extra={"subject": "SECRET-SUBJECT", "to": "attacker@evil.com"},
+                extra={"PRIVATE_MESSAGE_TOKEN": "SECRET-SUBJECT", "to": "attacker@evil.com"},
             )
         ]
     )
@@ -738,9 +743,8 @@ def test_extra_tool_arguments_log_field_names_not_values(
         )
 
     assert "unsupported arguments" in caplog.text
-    assert "subject" in caplog.text
-    assert "to" in caplog.text
-    # The values of the extra fields must not be logged.
+    assert "ignored_count=2" in caplog.text
+    assert "PRIVATE_MESSAGE_TOKEN" not in caplog.text
     assert "SECRET-SUBJECT" not in caplog.text
     assert "attacker@evil.com" not in caplog.text
 

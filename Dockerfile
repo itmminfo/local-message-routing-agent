@@ -13,7 +13,10 @@ COPY requirements.lock .
 #   uv pip compile requirements.txt --generate-hashes -o requirements.lock
 RUN pip install --no-cache-dir --require-hashes --timeout=100 --retries=10 -r requirements.lock
 
-COPY . .
+# Copy only runtime code. A broad COPY would put local-only project files into
+# the image if someone changed the build context by mistake.
+COPY app/ ./app/
+COPY scripts/__init__.py scripts/e2e_mail_check.py scripts/mock_ollama.py scripts/routing_accuracy_check.py ./scripts/
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 
