@@ -51,6 +51,8 @@ jobs:
         run: >-
           docker run --rm --entrypoint sh local-message-routing-agent:ci -c
           'test -f /app/app/main.py && test -f /app/scripts/e2e_mail_check.py &&
+          test -f /app/scripts/adversarial_eval.py &&
+          test -f /app/scripts/data/adversarial_pairs_v1.json &&
           test ! -e /app/tests && test ! -e /app/README.md &&
           test ! -e /app/SECURITY.md && test ! -e /app/.env'
 

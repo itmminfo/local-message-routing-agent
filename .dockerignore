@@ -41,5 +41,9 @@ app/schemas/*
 scripts/*
 !scripts/__init__.py
 !scripts/e2e_mail_check.py
+!scripts/adversarial_eval.py
 !scripts/mock_ollama.py
 !scripts/routing_accuracy_check.py
+!scripts/data/
+scripts/data/*
+!scripts/data/adversarial_pairs_v1.json
