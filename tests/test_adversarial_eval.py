@@ -65,7 +65,16 @@ def test_v1_dataset_is_balanced_new_and_fixed() -> None:
     )
 
 
-def test_metrics_require_correct_control_before_attributing_a_switch() -> None:
+def test_dataset_hash_is_the_same_for_lf_and_crlf(tmp_path: Path) -> None:
+    raw = adversarial_eval.DEFAULT_DATASET.read_bytes().replace(bytes([13, 10]), bytes([10]))
+    path = tmp_path / "pairs.json"
+    path.write_bytes(raw)
+    lf_hash = adversarial_eval.load_dataset(path).sha256
+    path.write_bytes(raw.replace(bytes([10]), bytes([13, 10])))
+    assert adversarial_eval.load_dataset(path).sha256 == lf_hash
+
+
+def test_metrics_require_correct_control_before_counting_paired_switch() -> None:
     pairs = [
         pair("targeted", "kadry@example.com", "human-resources@example.com", "clean A"),
         pair("wrong-control", "it@example.com", "help-desk@example.com", "clean B"),
@@ -96,8 +105,8 @@ def test_metrics_require_correct_control_before_attributing_a_switch() -> None:
         "controls_correct_without_fallback": 2,
         "injected_correct_without_fallback": 0,
         "wrong_allowed_after_attack": 4,
-        "attack_induced_wrong_allowed": 2,
-        "attacker_targeted_switch": 1,
+        "paired_wrong_allowed_switch": 2,
+        "paired_targeted_switch": 1,
         "wrong_allowed_with_high_confidence": 3,
         "clean_fallbacks": 1,
         "injected_fallbacks": 1,
@@ -114,23 +123,6 @@ def test_evaluator_rejects_non_allowlisted_api_result() -> None:
         adversarial_eval.evaluate_pairs(
             dataset, route_func=lambda _message: response("attacker@example.com")
         )
-
-
-@pytest.mark.parametrize(
-    "url",
-    ["http://localhost:8000", "http://127.0.0.1:8000", "http://api:8000"],
-)
-def test_local_api_guard_accepts_local_targets(url: str) -> None:
-    adversarial_eval.require_local_api(url)
-
-
-@pytest.mark.parametrize(
-    "url",
-    ["https://example.com", "http://192.168.1.10:8000", "file:///tmp/api", "http://evil.test"],
-)
-def test_local_api_guard_rejects_remote_targets(url: str) -> None:
-    with pytest.raises(ValueError, match="local Compose API"):
-        adversarial_eval.require_local_api(url)
 
 
 @pytest.mark.parametrize(
@@ -162,6 +154,20 @@ def test_mailpit_probe_requires_messages_api(monkeypatch: pytest.MonkeyPatch) ->
     )
     with pytest.raises(ValueError, match="Mailpit messages list"):
         adversarial_eval.probe_mailpit("http://localhost:8025")
+
+
+def test_compose_guard_rejects_external_smtp_even_with_local_mailpit() -> None:
+    adversarial_eval.require_safe_compose(
+        "http://api:8000", "http://mailpit:8025", "mailpit", "1025"
+    )
+    with pytest.raises(ValueError, match="SMTP_HOST=mailpit"):
+        adversarial_eval.require_safe_compose(
+            "http://api:8000", "http://mailpit:8025", "smtp.example.com", "587"
+        )
+    with pytest.raises(ValueError, match="Compose tools"):
+        adversarial_eval.require_safe_compose(
+            "http://localhost:8000", "http://mailpit:8025", "mailpit", "1025"
+        )
 
 
 def test_dataset_rejects_duplicate_ids(tmp_path: Path) -> None:

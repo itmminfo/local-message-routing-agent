@@ -121,6 +121,10 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       MAIL_API_URL: http://mailpit:8025
+      # Mirror api SMTP settings so the adversarial evaluator refuses a
+      # 40-message run if .env points api at anything other than Mailpit.
+      EVAL_SMTP_HOST: ${SMTP_HOST:-mailpit}
+      EVAL_SMTP_PORT: ${SMTP_PORT:-1025}
     entrypoint: ["python"]
     depends_on:
       api:
