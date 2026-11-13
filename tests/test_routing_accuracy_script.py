@@ -160,6 +160,8 @@ def test_route_posts_payload_to_route_endpoint(monkeypatch: pytest.MonkeyPatch) 
         "email": module.SENDER_EMAIL,
         "message": "Nie dziala komputer",
     }
+    module.route("Nie dziala komputer", require_local_smtp=True)
+    assert str(captured["url"]).endswith("/api/v1/messages/route-local-eval")
 
 
 def test_held_out_cases_cover_all_departments() -> None:

@@ -167,3 +167,22 @@ def route_message(
         ) from exc
     finally:
         _route_semaphore.release()
+
+
+@api_router.post(
+    "/messages/route-local-eval",
+    response_model=MessageRouteResponse,
+    include_in_schema=False,
+)
+def route_message_local_eval(
+    request: MessageRouteRequest,
+    service: MessageRoutingService = Depends(get_message_routing_service),
+    mail_sender: MailSender = Depends(get_mail_sender),
+) -> MessageRouteResponse:
+    # A dedicated path fails closed against an older API image: it returns 404
+    # rather than ignoring a new safety header and sending through external SMTP.
+    # FastAPI reuses get_mail_sender within the request, so this is the sender
+    # the routing service will use for delivery.
+    if mail_sender.smtp_host != "mailpit" or mail_sender.smtp_port != 1025:
+        raise HTTPException(status_code=409, detail="Local Mailpit SMTP is required.")
+    return route_message(request, service)
