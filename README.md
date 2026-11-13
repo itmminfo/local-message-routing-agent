@@ -21,6 +21,8 @@ wiąże porty wyłącznie z `127.0.0.1`.
   skierowała wszystkie 20 wariantów na dozwolony adres wskazany przez atakującego.
   W 16 parach poprawnie obsłużona czysta wiadomość zmieniła dział po dopisaniu
   instrukcji. Wynik dotyczy tego modelu i zbioru, nie ruchu produkcyjnego.
+  Dwa przebiegi na osobnym hoście CPU potwierdziły metryki; jedna już błędna
+  kontrola miała innego odbiorcę niż na pierwszym hoście.
   [Metoda i surowe wyniki](docs/adversarial-eval-v1.md).
 - Uruchomienie lokalne: `docker compose up -d`. PoC nie ma uwierzytelniania ani
   produkcyjnego dostawcy poczty.
