@@ -17,6 +17,11 @@ wiąże porty wyłącznie z `127.0.0.1`.
   z deterministycznym mockiem. W osobnym teście rzeczywisty model osiągnął
   20/25 wobec 5/25 prostego stubu, ale tylko 2/5 przy próbach prompt injection.
   Metoda i ograniczenia: [`docs/eval.md`](docs/eval.md).
+- W nowej ewaluacji 20 syntetycznych par instrukcja dopisana do zgłoszenia
+  skierowała wszystkie 20 wariantów na dozwolony adres wskazany przez atakującego.
+  W 16 parach poprawnie obsłużona czysta wiadomość zmieniła dział po dopisaniu
+  instrukcji. Wynik dotyczy tego modelu i zbioru, nie ruchu produkcyjnego.
+  [Metoda i surowe wyniki](docs/adversarial-eval-v1.md).
 - Uruchomienie lokalne: `docker compose up -d`. PoC nie ma uwierzytelniania ani
   produkcyjnego dostawcy poczty.
 
@@ -300,6 +305,8 @@ Zarejestrowane przebiegi (data, wersja i digest modelu, wyniki według zbiorów
 oraz analiza pomyłek) znajdują się w [`docs/eval.md`](docs/eval.md). Wcześniejszy
 zbiór held-out jest mały i łatwy: osiąga na nim 13/14 także prosty słownikowy
 mock. Zbiór `challenge` sprawdza inne języki, parafrazy i próby manipulacji.
+Odrębny, wersjonowany [test par kontrolnych i prompt injection](docs/adversarial-eval-v1.md)
+mierzy także wybór błędnego adresata z dozwolonej listy.
 
 ## Założenia domenowe
 

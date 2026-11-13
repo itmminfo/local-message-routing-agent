@@ -4,6 +4,10 @@ Ten dokument zawiera realny, datowany przebieg `scripts/routing_accuracy_check.p
 wraz ze środowiskiem i wersją/digestem modelu. To **diagnostyka jakości**, a nie
 bramka CI (uzasadnienie w sekcji "Ograniczenia").
 
+Nowszy [test 20 par kontrolnych i prompt injection](adversarial-eval-v1.md)
+ma osobny zbiór, skrypt i metryki. Liczb z tych dwóch testów nie należy
+traktować jako porównywalnych wskaźników skuteczności ataku.
+
 ## Środowisko
 
 | Element | Wartość |
