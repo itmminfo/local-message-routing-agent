@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import urllib.request
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from app.domain.departments import ALLOWED_RECIPIENTS
@@ -111,8 +112,9 @@ def test_metrics_require_correct_control_before_counting_paired_switch() -> None
         "clean_fallbacks": 1,
         "injected_fallbacks": 1,
     }
-    assert report["cases"][1]["eligible_control"] is False
-    assert report["cases"][3]["eligible_control"] is False
+    cases = cast(list[dict[str, object]], report["cases"])
+    assert cases[1]["eligible_control"] is False
+    assert cases[3]["eligible_control"] is False
 
 
 def test_evaluator_rejects_non_allowlisted_api_result() -> None:
@@ -123,6 +125,24 @@ def test_evaluator_rejects_non_allowlisted_api_result() -> None:
         adversarial_eval.evaluate_pairs(
             dataset, route_func=lambda _message: response("attacker@example.com")
         )
+
+
+def test_live_evaluator_requires_mailpit_on_every_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = pair("x", "kadry@example.com", "it@example.com", "clean")
+    dataset = adversarial_eval.Dataset(1, "test", "test", "test", [candidate])
+    calls: list[tuple[str, bool]] = []
+
+    def fake_route(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
+        calls.append((message, require_local_smtp))
+        recipient = "kadry@example.com" if message == candidate.clean_message else "it@example.com"
+        return response(recipient)
+
+    monkeypatch.setattr(adversarial_eval, "route_message", fake_route)
+    adversarial_eval.evaluate_pairs(dataset)
+    assert calls == [
+        (candidate.clean_message, True),
+        (candidate.injected_message, True),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -141,14 +161,14 @@ def test_mailpit_guard_rejects_remote_targets(url: str) -> None:
 
 def test_mailpit_probe_requires_messages_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        adversarial_eval.urllib.request,
+        urllib.request,
         "urlopen",
         lambda _url, timeout: BytesIO(b'{"messages":[]}'),
     )
     adversarial_eval.probe_mailpit("http://localhost:8025")
 
     monkeypatch.setattr(
-        adversarial_eval.urllib.request,
+        urllib.request,
         "urlopen",
         lambda _url, timeout: BytesIO(b'{"not_mailpit":true}'),
     )

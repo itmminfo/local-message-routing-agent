@@ -327,6 +327,49 @@ def test_message_route_delegates_to_message_routing_service() -> None:
     assert service.requests[0].message == "Hello"
 
 
+def test_local_eval_route_rejects_non_mailpit_smtp_before_sending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeMessageRoutingService()
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    get_settings.cache_clear()
+    try:
+        response = request_with_service(
+            service,
+            "POST",
+            "/api/v1/messages/route-local-eval",
+            json={"email": "sender@example.com", "message": "Hello"},
+        )
+        assert response.status_code == 409
+        assert service.requests == []
+    finally:
+        get_settings.cache_clear()
+
+
+def test_local_eval_route_accepts_mailpit_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = FakeMessageRoutingService()
+    monkeypatch.setenv("SMTP_HOST", "mailpit")
+    monkeypatch.setenv("SMTP_PORT", "1025")
+    get_settings.cache_clear()
+    try:
+        response = request_with_service(
+            service,
+            "POST",
+            "/api/v1/messages/route-local-eval",
+            json={"email": "sender@example.com", "message": "Hello"},
+        )
+        assert response.status_code == 200
+        assert len(service.requests) == 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_local_eval_route_is_hidden_from_openapi() -> None:
+    schema = request("GET", "/api/v1/openapi.json").json()
+    assert "/api/v1/messages/route-local-eval" not in schema["paths"]
+
+
 def test_message_route_maps_ollama_unavailable_to_503() -> None:
     response = request_with_service(
         RaisingMessageRoutingService(OllamaUnavailableError("Ollama unavailable")),

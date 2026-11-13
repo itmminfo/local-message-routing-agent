@@ -39,6 +39,7 @@ from scripts.mock_ollama import classify as keyword_baseline  # noqa: E402
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "routing-accuracy@example.com")
 ROUTE_URL = f"{API_BASE_URL}/api/v1/messages/route"
+LOCAL_EVAL_ROUTE_URL = f"{API_BASE_URL}/api/v1/messages/route-local-eval"
 # Default is generous so a cold or CPU-only inference does not time out.
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "180"))
 
@@ -254,13 +255,14 @@ BOUNDARY_CASES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
-def route(message: str) -> dict[str, Any]:
+def route(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
     payload = json.dumps({"email": SENDER_EMAIL, "message": message}, ensure_ascii=False).encode(
         "utf-8"
     )
-    require_http_url(ROUTE_URL)
+    target_url = LOCAL_EVAL_ROUTE_URL if require_local_smtp else ROUTE_URL
+    require_http_url(target_url)
     request = urllib.request.Request(
-        ROUTE_URL,
+        target_url,
         data=payload,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
@@ -274,9 +276,9 @@ def route(message: str) -> dict[str, Any]:
     return data
 
 
-def route_message(message: str) -> dict[str, Any]:
+def route_message(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
     try:
-        return route(message)
+        return route(message, require_local_smtp=require_local_smtp)
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise SystemExit(f"ERROR: API returned HTTP {exc.code} for {message!r}: {body}") from exc

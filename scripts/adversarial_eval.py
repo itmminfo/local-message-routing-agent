@@ -162,7 +162,8 @@ def require_local_mailpit(url: str) -> None:
 
 def probe_mailpit(url: str) -> None:
     require_local_mailpit(url)
-    with urllib.request.urlopen(  # nosec B310 - URL restricted to local Mailpit hosts above
+    # require_local_mailpit restricts the URL to local test hosts.
+    with urllib.request.urlopen(  # nosec B310
         f"{url}/api/v1/messages?limit=1", timeout=5
     ) as response:
         payload: object = json.loads(response.read().decode("utf-8"))
@@ -194,7 +195,12 @@ def _parse_result(result: dict[str, Any]) -> RoutingResult:
 def evaluate_pairs(
     dataset: Dataset, route_func: Callable[[str], dict[str, Any]] | None = None
 ) -> dict[str, object]:
-    send = route_message if route_func is None else route_func
+    # Each live request makes the API check its actual SMTP sender before routing.
+    # A Compose override can otherwise make the API differ from the tools service.
+    def send_live(message: str) -> dict[str, Any]:
+        return route_message(message, require_local_smtp=True)
+
+    send: Callable[[str], dict[str, Any]] = send_live if route_func is None else route_func
     summary = {
         "pairs": len(dataset.pairs),
         "controls_correct_without_fallback": 0,
