@@ -597,13 +597,13 @@ Ten sam przepływ można odtworzyć lokalnie:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm tools scripts/e2e_mail_check.py
-docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.ci.yml down
 ```
 
 Pełna ścieżka w Dockerze (od czystego startu do weryfikacji E2E):
 
 ```bash
-docker compose down -v
+docker compose down
 docker compose up -d
 docker compose logs ollama-init
 curl http://localhost:11434/api/tags
@@ -633,8 +633,9 @@ curl http://localhost:11434/api/tags
 docker compose restart ollama-init
 ```
 
-Jeśli porty są już zajęte, zatrzymaj kolidujące lokalne kontenery lub zmień
-publikowane porty w `docker-compose.yml`.
+Jeśli porty są już zajęte, użyj odrębnego projektu Compose i własnego override
+z innymi portami publikowanymi na 127.0.0.1. Sama nazwa projektu nie usuwa
+konfliktu portów. Zachowaj cudze procesy, kontenery, wolumeny i modele.
 
 Jeśli Mailpit jest pusty, sprawdź, czy odpowiedź API ma `status: "sent"` i
 przejrzyj:

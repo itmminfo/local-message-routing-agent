@@ -1,0 +1,33 @@
+services:
+  api:
+    image: lmra-routing-boundary:local
+    environment:
+      OLLAMA_MODEL: qwen2.5:7b
+      REQUEST_TIMEOUT_SECONDS: 600
+      MAX_CONCURRENT_ROUTE_REQUESTS: 1
+    ports: !override
+      - "127.0.0.1:18000:8000"
+  ollama:
+    cpus: 3
+    mem_limit: 4g
+    ports: !override
+      - "127.0.0.1:18434:11434"
+    volumes: !override
+      - existing-model:/root/.ollama
+  ollama-init:
+    environment:
+      OLLAMA_MODEL: qwen2.5:7b
+  mailpit:
+    ports: !override
+      - "127.0.0.1:18025:8025"
+  tools:
+    image: lmra-routing-boundary:local
+    environment:
+      OLLAMA_MODEL: qwen2.5:7b
+      REQUEST_TIMEOUT_SECONDS: 600
+volumes:
+  existing-model:
+    external: true
+    name: lmra-routing-boundary-candidate-models
+
+
