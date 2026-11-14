@@ -34,6 +34,13 @@ do lokalnego modelu uruchomionego w Ollamie. Model wybiera właściwy dział wew
 przez wywołanie narzędzia `send_email`. Backend waliduje to wywołanie i wysyła
 utworzoną wiadomość e-mail do Mailpita.
 
+Przed wyborem narzędzia osobne wywołanie modelu, bez narzędzi i listy adresatów,
+proponuje dosłowne cytaty opisujące sprawę. Backend przyjmuje tylko niepuste,
+niepokrywające się fragmenty istniejące w oryginale. Dopiero ich kopie trafiają
+do klasyfikatora. Oryginał pozostaje w wysłanym mailu. Błędna lub pusta ekstrakcja
+zwraca HTTP 502 bez wysyłki. Ta walidacja potwierdza pochodzenie tekstu,
+nie poprawność semantyczną ani brak instrukcji w cytacie.
+
 Ścieżka podstawowa:
 
 ```text

@@ -8,6 +8,7 @@ only accepts local API and Mailpit hosts and probes Mailpit before sending.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -269,6 +270,9 @@ def evaluate_pairs(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
+    arguments = parser.parse_args()
     try:
         require_safe_compose(
             API_BASE_URL,
@@ -277,7 +281,7 @@ def main() -> int:
             os.environ.get("EVAL_SMTP_PORT", ""),
         )
         probe_mailpit(MAIL_API_URL)
-        dataset = load_dataset(DEFAULT_DATASET)
+        dataset = load_dataset(arguments.dataset)
         print(
             f"Sending {2 * len(dataset.pairs)} synthetic messages to local Compose/Mailpit.",
             file=sys.stderr,

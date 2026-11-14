@@ -13,6 +13,7 @@ app/*
 app/agent/*
 !app/agent/__init__.py
 !app/agent/prompts.py
+!app/agent/issue_boundary.py
 !app/agent/routing_agent.py
 !app/agent/tool_schema.py
 !app/api/
@@ -47,3 +48,4 @@ scripts/*
 !scripts/data/
 scripts/data/*
 !scripts/data/adversarial_pairs_v1.json
+!scripts/data/adversarial_holdout_v1.json

@@ -154,6 +154,18 @@ def build_tags_response() -> dict[str, Any]:
 
 
 def build_chat_response(payload: dict[str, Any]) -> dict[str, Any]:
+    if "format" in payload:
+        # Plumbing only: quote the entire input. This deliberately does not pretend
+        # to test prompt-injection resistance or semantic extraction.
+        data = json.loads(_last_user_message(payload))
+        return {
+            "model": MODEL,
+            "message": {
+                "role": "assistant",
+                "content": json.dumps({"issue_quotes": [data["message"]]}),
+            },
+            "done": True,
+        }
     recipient = classify(_last_user_message(payload))
     return {
         "model": MODEL,

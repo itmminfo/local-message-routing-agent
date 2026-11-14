@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
+from app.agent.issue_boundary import (
+    build_issue_selection_request,
+    issue_selection_fingerprint,
+    selected_issue_text,
+)
 from app.agent.prompts import build_routing_messages, routing_prompt_fingerprint
 from app.agent.tool_schema import build_send_email_tool_schema
 from app.domain.departments import ALLOWED_RECIPIENTS, DepartmentEmail
@@ -26,6 +31,12 @@ class SupportsChatWithTools(Protocol):
     """Minimal contract the agent needs from an Ollama-style chat client."""
 
     model: str
+
+    def chat_with_schema(
+        self,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+    ) -> dict[str, Any]: ...
 
     def chat_with_tools(
         self,
@@ -98,13 +109,17 @@ class RoutingAgent:
 
     def route(self, sender_email: str, message: str) -> RouteResult:
         logger.info(
-            "Routing started model=%s prompt=%s message_length=%d",
+            "Routing started model=%s prompt=%s issue_prompt=%s message_length=%d",
             self.model,
             routing_prompt_fingerprint(),
+            issue_selection_fingerprint(),
             len(message),
         )
 
-        messages = build_routing_messages(sender_email=sender_email, message=message)
+        selection_messages, selection_schema = build_issue_selection_request(message)
+        selection = self.ollama_client.chat_with_schema(selection_messages, selection_schema)
+        issue_text = selected_issue_text(selection, message)
+        messages = build_routing_messages(sender_email=sender_email, message=issue_text)
         tools = [build_send_email_tool_schema()]
 
         response = self.ollama_client.chat_with_tools(messages, tools)

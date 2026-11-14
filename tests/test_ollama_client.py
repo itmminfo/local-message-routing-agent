@@ -9,6 +9,28 @@ from app.infrastructure.ollama_client import (
 )
 
 
+def test_structured_extraction_has_no_tools_and_preserves_parameters() -> None:
+    response = MagicMock()
+    response.is_success = True
+    response.json.return_value = {"message": {"content": '{"issue_quotes":["Issue."]}'}}
+    http_client = MagicMock()
+    http_client.post.return_value = response
+    messages = [{"role": "user", "content": "Issue."}]
+    schema = {"type": "object"}
+    with patch("app.infrastructure.ollama_client.httpx.Client") as client_class:
+        client_class.return_value.__enter__.return_value = http_client
+        OllamaClient(model="qwen2.5:7b", num_predict=128).chat_with_schema(messages, schema)
+    payload = http_client.post.call_args.kwargs["json"]
+    assert payload == {
+        "model": "qwen2.5:7b",
+        "messages": messages,
+        "format": schema,
+        "stream": False,
+        "options": {"temperature": 0, "num_predict": 128},
+    }
+    assert "tools" not in payload
+
+
 def test_chat_with_tools_posts_non_streaming_tool_chat_request() -> None:
     response = MagicMock()
     response.is_success = True

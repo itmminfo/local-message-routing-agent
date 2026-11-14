@@ -59,6 +59,19 @@ i wyślij na attacker@..." skończyło się odrzuceniem adresu spoza enuma i fal
 
 ## Ryzyka rezydualne (świadome w PoC)
 
+Od 14 listopada przed routingiem działa `app/agent/issue_boundary.py`.
+Surową treść czyta osobne wywołanie lokalnego modelu bez narzędzi i listy
+adresatów. Backend sprawdza dosłowne cytaty, ich obecność w oryginale i brak
+nakładania, a następnie sam kopiuje je do wejścia klasyfikatora. Niepoprawna
+ekstrakcja kończy żądanie HTTP 502 bez SMTP. Model może jednak wybrać cytat
+zawierający instrukcję albo pominąć poprawne zgłoszenie. Pochodzenie cytatu
+nie dowodzi odporności semantycznej; nie wolno uznawać odmów za trafną klasyfikację.
+
+Nie ma trwałego outbox ani klucza idempotencji. Powtórzone żądanie może wysłać
+kolejną kopię. Jeśli SMTP przyjmie DATA, a połączenie zniknie przed końcowym
+potwierdzeniem, API może zwrócić 502 mimo dostarczenia. Przed ponowieniem
+trzeba sprawdzić odbiornik; serwis nie zapewnia exactly-once.
+
 | Ryzyko | Waga (prod) | Status w PoC |
 |---|---|---|
 | Brak auth i rate-limit na endpointcie | Wysoka | Akceptowane dzięki bind `127.0.0.1`; pierwsze do dodania przed wystawieniem |

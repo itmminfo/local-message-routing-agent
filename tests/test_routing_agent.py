@@ -48,6 +48,13 @@ class FakeOllamaClient:
         self.calls: list[dict[str, Any]] = []
         self.model = "qwen2.5:3b"
 
+    def chat_with_schema(
+        self, messages: list[dict[str, Any]], schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        # This fake exercises the downstream tool parser, not model extraction quality.
+        original = json.loads(messages[1]["content"])["message"]
+        return {"message": {"content": json.dumps({"issue_quotes": [original]})}}
+
     def chat_with_tools(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:

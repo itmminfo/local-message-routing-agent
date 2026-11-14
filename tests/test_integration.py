@@ -53,6 +53,10 @@ def test_route_message_wires_real_agent_ollama_client_and_mail_sender() -> None:
     ollama_response = MagicMock()
     ollama_response.is_success = True
     ollama_response.json.return_value = ollama_tool_response("help-desk@example.com")
+    ollama_response.json.side_effect = [
+        {"message": {"content": '{"issue_quotes":["Nie działa mi komputer"]}'}},
+        ollama_tool_response("help-desk@example.com"),
+    ]
 
     http_client = MagicMock()
     http_client.post.return_value = ollama_response
@@ -84,7 +88,10 @@ def test_route_message_wires_real_agent_ollama_client_and_mail_sender() -> None:
     assert body["used_fallback"] is False
 
     # The real OllamaClient actually posted to the Ollama chat endpoint...
-    http_client.post.assert_called_once()
+    assert http_client.post.call_count == 2
+    extraction_payload = http_client.post.call_args_list[0].kwargs["json"]
+    assert "format" in extraction_payload
+    assert "tools" not in extraction_payload
     assert http_client.post.call_args.args[0].endswith("/api/chat")
 
     # ...and the real MailSender actually delivered the routed email over SMTP
@@ -106,6 +113,11 @@ def test_route_message_falls_back_to_other_when_model_returns_no_tool_call() -> 
     no_tool_response = MagicMock()
     no_tool_response.is_success = True
     no_tool_response.json.return_value = {"message": {"content": "Plain text answer"}}
+    no_tool_response.json.side_effect = [
+        {"message": {"content": '{"issue_quotes":["Nie działa mi komputer"]}'}},
+        {"message": {"content": "Plain text answer"}},
+        {"message": {"content": "Plain text answer"}},
+    ]
 
     http_client = MagicMock()
     http_client.post.return_value = no_tool_response
@@ -135,8 +147,8 @@ def test_route_message_falls_back_to_other_when_model_returns_no_tool_call() -> 
     assert body["recipient"] == "other@example.com"
     assert body["used_fallback"] is True
 
-    # One initial call plus one retry before the deterministic fallback.
-    assert http_client.post.call_count == 2
+    # Grounding call, then initial routing and one retry before fallback.
+    assert http_client.post.call_count == 3
     smtp.send_message.assert_called_once()
     message = smtp.send_message.call_args.args[0]
     assert message["To"] == "other@example.com"

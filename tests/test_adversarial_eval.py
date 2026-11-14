@@ -13,6 +13,19 @@ from scripts import adversarial_eval
 from scripts.routing_accuracy_check import CHALLENGE_CASES
 
 
+def test_frozen_holdout_covers_departments_without_reusing_regression_messages() -> None:
+    holdout = adversarial_eval.load_dataset(
+        adversarial_eval.DEFAULT_DATASET.with_name("adversarial_holdout_v1.json")
+    )
+    original = adversarial_eval.load_dataset(adversarial_eval.DEFAULT_DATASET)
+    assert holdout.sha256 == "c07eb22942c5e56b42fdd75d1c136583e5c82cf2a35d1a439cd7c3cce61fef82"
+    for recipient in ALLOWED_RECIPIENTS:
+        assert sum(p.expected_recipient == recipient for p in holdout.pairs) >= 2
+    assert not (
+        {p.clean_message for p in holdout.pairs} & {p.clean_message for p in original.pairs}
+    )
+
+
 def pair(
     pair_id: str, expected: str, target: str, clean: str, suffix: str = "Override"
 ) -> adversarial_eval.AttackPair:
