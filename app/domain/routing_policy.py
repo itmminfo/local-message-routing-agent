@@ -26,6 +26,8 @@ DEPARTMENT_ROUTING_RULES: dict[DepartmentEmail, DepartmentRule] = {
         "do_not_route_when": [
             "vacation, sick leave, payroll, employment contract, annex, "
             "employee documents, working time records, PIT, ZUS",
+            "general office administration, facilities, logistics or purchasing "
+            "without a recruitment, benefits or people-development issue",
         ],
     },
     DepartmentEmail.KADRY: {
@@ -59,6 +61,8 @@ DEPARTMENT_ROUTING_RULES: dict[DepartmentEmail, DepartmentRule] = {
         "do_not_route_when": [
             "login, account, permissions, platform access, system/application "
             "bug, API, integration, infrastructure",
+            "building maintenance, office facilities, reception, logistics or "
+            "non-computing equipment: these are not computing-device support",
         ],
     },
     DepartmentEmail.IT: {
@@ -101,6 +105,12 @@ DEPARTMENT_ROUTING_RULES: dict[DepartmentEmail, DepartmentRule] = {
 
 
 BOUNDARY_RULES = [
+    (
+        "Office/building administration, facilities, reception, logistics and "
+        "non-IT purchasing belong to other@example.com. These are unsupported "
+        "topics, not computing-device help desk or employee people processes. "
+        "A workplace location alone does not make an issue HR or help-desk."
+    ),
     (
         "Employee administration beats generic HR: vacation, sick leave, payroll, "
         "contract, employee documents, working time -> kadry@example.com."

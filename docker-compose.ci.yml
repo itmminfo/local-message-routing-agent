@@ -4,11 +4,14 @@
 #   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
 #   docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm tools scripts/e2e_mail_check.py
 #
-# The mock is a keyword stub, NOT a model: the CI E2E proves the plumbing (request ->
-# tool call -> validated recipient -> SMTP -> Mailpit, correct Reply-To/headers) and
+# The mock is a keyword stub, NOT a model: the CI E2E proves the plumbing (preview -> optional proposal ->
+# explicit synthetic approval -> SMTP -> Mailpit, correct Reply-To/headers) and
 # that the pipeline carries the chosen recipient to the To header. Real routing
 # accuracy is non-deterministic and is measured separately (docs/eval.md).
 services:
+  tools:
+    environment:
+      REQUIRE_SUGGESTION: "true"
   ollama:
     # Plain Python image (same pinned digest as the Dockerfile) running the mock,
     # instead of the real model server. No model is pulled.

@@ -9,8 +9,21 @@ from typing import Any, cast
 import pytest
 from app.domain.departments import ALLOWED_RECIPIENTS
 from app.domain.routing_policy import ROUTING_EXAMPLES
-from scripts import adversarial_eval
+from scripts import adversarial_eval, routing_accuracy_check
 from scripts.routing_accuracy_check import CHALLENGE_CASES
+
+
+def test_frozen_holdout_covers_departments_without_reusing_regression_messages() -> None:
+    holdout = adversarial_eval.load_dataset(
+        adversarial_eval.DEFAULT_DATASET.with_name("adversarial_holdout_v1.json")
+    )
+    original = adversarial_eval.load_dataset(adversarial_eval.DEFAULT_DATASET)
+    assert holdout.sha256 == "c07eb22942c5e56b42fdd75d1c136583e5c82cf2a35d1a439cd7c3cce61fef82"
+    for recipient in ALLOWED_RECIPIENTS:
+        assert sum(p.expected_recipient == recipient for p in holdout.pairs) >= 2
+    assert not (
+        {p.clean_message for p in holdout.pairs} & {p.clean_message for p in original.pairs}
+    )
 
 
 def pair(
@@ -111,10 +124,151 @@ def test_metrics_require_correct_control_before_counting_paired_switch() -> None
         "wrong_allowed_with_high_confidence": 3,
         "clean_fallbacks": 1,
         "injected_fallbacks": 1,
+        "clean_unavailable": 0,
+        "injected_unavailable": 0,
     }
     cases = cast(list[dict[str, object]], report["cases"])
     assert cases[1]["eligible_control"] is False
     assert cases[3]["eligible_control"] is False
+
+
+def test_evaluator_counts_unavailable_proposals_without_fabricating_wrong_recipient() -> None:
+    pairs = [
+        pair("attack-unavailable", "kadry@example.com", "it@example.com", "clean A"),
+        pair("control-unavailable", "it@example.com", "kadry@example.com", "clean B"),
+    ]
+    answers: dict[str, dict[str, Any]] = {
+        "clean A": response("kadry@example.com"),
+        pairs[0].injected_message: {
+            "status": "error",
+            "recipient": None,
+            "error": "No valid model proposal",
+        },
+        "clean B": {"status": "error", "recipient": None, "error": "Model timeout"},
+        pairs[1].injected_message: response("it@example.com"),
+    }
+    called: list[str] = []
+
+    def route(message: str) -> dict[str, Any]:
+        called.append(message)
+        return answers[message]
+
+    dataset = adversarial_eval.Dataset(1, "unavailable", "test", "hash", pairs)
+    report = adversarial_eval.evaluate_pairs(dataset, route_func=route)
+    assert called == [
+        pairs[0].clean_message,
+        pairs[0].injected_message,
+        pairs[1].clean_message,
+        pairs[1].injected_message,
+    ]
+    summary = cast(dict[str, int], report["summary"])
+    assert summary == {
+        "pairs": 2,
+        "controls_correct_without_fallback": 1,
+        "injected_correct_without_fallback": 1,
+        "wrong_allowed_after_attack": 0,
+        "paired_wrong_allowed_switch": 0,
+        "paired_targeted_switch": 0,
+        "wrong_allowed_with_high_confidence": 0,
+        "clean_fallbacks": 0,
+        "injected_fallbacks": 0,
+        "clean_unavailable": 1,
+        "injected_unavailable": 1,
+    }
+    cases = cast(list[dict[str, Any]], report["cases"])
+    assert cases[0]["attacked_status"] == "unavailable"
+    assert cases[0]["attacked_recipient"] is None
+    assert cases[0]["attacked_error"] == "No valid model proposal"
+    assert cases[1]["control_status"] == "unavailable"
+    assert cases[1]["control_error"] == "Model timeout"
+    assert cases[1]["eligible_control"] is False
+
+
+@pytest.mark.parametrize("changes", [{"recipient": "other@example.com"}, {"used_fallback": True}])
+def test_unavailable_proposal_cannot_hide_a_fallback_or_recipient(changes: dict[str, Any]) -> None:
+    dataset = adversarial_eval.Dataset(
+        1, "test", "test", "test", [pair("x", "it@example.com", "kadry@example.com", "clean")]
+    )
+    with pytest.raises(ValueError):
+        adversarial_eval.evaluate_pairs(
+            dataset, route_func=lambda _: {"status": "error", "recipient": None, **changes}
+        )
+
+
+def test_live_diagnostic_boundary_completes_all_pairs_after_model_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pairs = [
+        pair("one", "kadry@example.com", "it@example.com", "case1"),
+        pair("two", "it@example.com", "kadry@example.com", "case2"),
+    ]
+    calls: list[str] = []
+
+    class FakeReviewClient:
+        def __init__(self, base_url: str, *, timeout: int) -> None:
+            self.message = ""
+
+        def start_session(self) -> None:
+            pass
+
+        def request(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            calls.append(path)
+            if path == routing_accuracy_check.REVIEW_PATH:
+                self.message = payload["message"]
+                return {"id": "a" * 32, "version": 1}
+            if path.endswith("/suggest"):
+                proposal: dict[str, Any] = {
+                    "status": "error",
+                    "recipient": None,
+                    "error": "Malformed model JSON",
+                }
+                if self.message != pairs[0].injected_message:
+                    proposal = {
+                        "status": "ready",
+                        "recipient": "kadry@example.com",
+                        "model": "test",
+                        "used_fallback": False,
+                        "routing_confidence": "high",
+                    }
+                return {"version": 1, "suggestion": proposal}
+            assert path.endswith("/reject")
+            return {"version": 1, "state": "rejected"}
+
+    monkeypatch.setattr(routing_accuracy_check, "ReviewClient", FakeReviewClient)
+    report = adversarial_eval.evaluate_pairs(
+        adversarial_eval.Dataset(1, "test", "test", "test", pairs)
+    )
+    assert len([path for path in calls if path.endswith("/suggest")]) == 4
+    assert len([path for path in calls if path.endswith("/reject")]) == 4
+    assert not any(path.endswith(("/approve", "/retry")) for path in calls)
+    assert len(cast(list[object], report["cases"])) == 2
+    summary = cast(dict[str, int], report["summary"])
+    assert summary["pairs"] == 2
+    assert summary["injected_unavailable"] == 1
+
+
+def test_all_unavailable_report_keeps_denominators_without_guessing_a_model() -> None:
+    dataset = adversarial_eval.load_dataset(adversarial_eval.DEFAULT_DATASET)
+    report = adversarial_eval.evaluate_pairs(
+        dataset,
+        route_func=lambda _: {
+            "status": "error",
+            "recipient": None,
+            "model": "",
+            "error": "No valid proposal",
+        },
+    )
+    assert report["models"] == []
+    assert len(cast(list[object], report["cases"])) == len(dataset.pairs)
+    summary = cast(dict[str, int], report["summary"])
+    assert summary["pairs"] == len(dataset.pairs)
+    assert summary["clean_unavailable"] == len(dataset.pairs)
+    assert summary["injected_unavailable"] == len(dataset.pairs)
+    assert summary["controls_correct_without_fallback"] == 0
+    assert summary["injected_correct_without_fallback"] == 0
+    assert summary["wrong_allowed_after_attack"] == 0
+    assert summary["clean_fallbacks"] == 0
+    assert summary["injected_fallbacks"] == 0
 
 
 def test_evaluator_rejects_non_allowlisted_api_result() -> None:

@@ -4,9 +4,20 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
+from app.agent.issue_boundary import (
+    build_issue_selection_request,
+    grounded_issue_quotes,
+    issue_selection_fingerprint,
+)
 from app.agent.prompts import build_routing_messages, routing_prompt_fingerprint
 from app.agent.tool_schema import build_send_email_tool_schema
 from app.domain.departments import ALLOWED_RECIPIENTS, DepartmentEmail
+from app.infrastructure.ollama_client import OllamaChatError
+
+
+class ReviewRequiredError(RuntimeError):
+    pass
+
 
 RETRY_INSTRUCTION = "You must call the send_email tool exactly once. Do not answer in plain text."
 
@@ -27,23 +38,17 @@ class SupportsChatWithTools(Protocol):
 
     model: str
 
+    def chat_with_schema(
+        self,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
     def chat_with_tools(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> dict[str, Any]: ...
-
-
-class SupportsSendEmail(Protocol):
-    """Minimal contract the agent needs from an email sender."""
-
-    def send_email(
-        self,
-        to: str,
-        reply_to: str,
-        subject: str,
-        body: str,
-    ) -> object: ...
 
 
 class FallbackCategory(StrEnum):
@@ -57,15 +62,13 @@ class FallbackCategory(StrEnum):
 
 
 @dataclass(frozen=True)
-class RouteResult:
-    status: Literal["sent"]
+class RoutingProposal:
     recipient: str
-    reply_to: str
-    subject: str
     reason: str
     used_fallback: bool
     model: str
     routing_confidence: Literal["high", "low"]
+    issue_quotes: list[str]
 
 
 @dataclass(frozen=True)
@@ -88,23 +91,26 @@ class RoutingAgent:
     def __init__(
         self,
         ollama_client: SupportsChatWithTools,
-        mail_sender: SupportsSendEmail,
     ) -> None:
         self.ollama_client = ollama_client
-        self.mail_sender = mail_sender
         # Single source of truth for the model: the client owns it (it is what is
         # actually sent to Ollama). Reported in RouteResult.model and logs.
         self.model = ollama_client.model
 
-    def route(self, sender_email: str, message: str) -> RouteResult:
+    def propose(self, sender_email: str, message: str) -> RoutingProposal:
         logger.info(
-            "Routing started model=%s prompt=%s message_length=%d",
+            "Routing started model=%s prompt=%s issue_prompt=%s message_length=%d",
             self.model,
             routing_prompt_fingerprint(),
+            issue_selection_fingerprint(),
             len(message),
         )
 
-        messages = build_routing_messages(sender_email=sender_email, message=message)
+        selection_messages, selection_schema = build_issue_selection_request(message)
+        selection = self.ollama_client.chat_with_schema(selection_messages, selection_schema)
+        issue_quotes = grounded_issue_quotes(selection, message)
+        issue_text = "\n".join(issue_quotes)
+        messages = build_routing_messages(sender_email=sender_email, message=issue_text)
         tools = [build_send_email_tool_schema()]
 
         response = self.ollama_client.chat_with_tools(messages, tools)
@@ -125,11 +131,7 @@ class RoutingAgent:
         if tool_args is None:
             category = parse_result.category or FallbackCategory.NO_TOOL_CALLS
             logger.info("Routing fallback used reason_category=%s", category.value)
-            return self._send_fallback(
-                sender_email=sender_email,
-                message=message,
-                reason=parse_result.invalid_reason,
-            )
+            raise OllamaChatError("Model did not provide a valid routing proposal.")
 
         logger.info("Valid send_email tool call found recipient=%s", tool_args.recipient)
         if tool_args.extra_field_count:
@@ -146,79 +148,19 @@ class RoutingAgent:
                 tool_args.recipient,
                 retried,
             )
-        return self._send_from_tool_args(
-            sender_email=sender_email,
-            message=message,
-            tool_args=tool_args,
+        return RoutingProposal(
+            recipient=tool_args.recipient,
+            reason=tool_args.reason,
             used_fallback=False,
-        )
-
-    def _send_from_tool_args(
-        self,
-        sender_email: str,
-        message: str,
-        tool_args: SendEmailToolArgs,
-        used_fallback: bool,
-    ) -> RouteResult:
-        # The email uses a deterministic Polish template. The model chooses the recipient
-        # and provides only a short reason, which is inserted into the body. Subject,
-        # Reply-To, and recipient validation stay application-controlled.
-        subject = self._build_subject(tool_args.recipient)
-        body = self._build_mail_body(
-            sender_email=sender_email,
-            recipient=tool_args.recipient,
-            original_message=message,
-            reason=tool_args.reason,
-            used_fallback=used_fallback,
-        )
-
-        self.mail_sender.send_email(
-            to=tool_args.recipient,
-            reply_to=sender_email,
-            subject=subject,
-            body=body,
-        )
-        logger.info("Routing email sent recipient=%s", tool_args.recipient)
-
-        # Confidence derived from the outcome, not self-reported by the model: "low"
-        # for a fallback or the OTHER catch-all, "high" for a clean specific recipient.
-        routing_confidence: Literal["high", "low"] = (
-            "low" if used_fallback or tool_args.recipient == DepartmentEmail.OTHER.value else "high"
-        )
-        if routing_confidence == "low":
-            logger.info(
-                "Routing low confidence recipient=%s used_fallback=%s",
-                tool_args.recipient,
-                used_fallback,
-            )
-
-        return RouteResult(
-            status="sent",
-            recipient=tool_args.recipient,
-            reply_to=sender_email,
-            subject=subject,
-            reason=tool_args.reason,
-            used_fallback=used_fallback,
             model=self.model,
-            routing_confidence=routing_confidence,
+            routing_confidence=(
+                "low" if tool_args.recipient == DepartmentEmail.OTHER.value else "high"
+            ),
+            issue_quotes=issue_quotes,
         )
 
-    def _send_fallback(
-        self,
-        sender_email: str,
-        message: str,
-        reason: str,
-    ) -> RouteResult:
-        tool_args = SendEmailToolArgs(
-            recipient=DepartmentEmail.OTHER.value,
-            reason=reason,
-        )
-        return self._send_from_tool_args(
-            sender_email=sender_email,
-            message=message,
-            tool_args=tool_args,
-            used_fallback=True,
-        )
+    def route(self, sender_email: str, message: str) -> RoutingProposal:
+        raise ReviewRequiredError("Human review is required before delivery.")
 
     def _parse_send_email_tool_calls(
         self,

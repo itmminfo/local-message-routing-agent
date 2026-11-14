@@ -1,5 +1,16 @@
 # Wyniki ewaluacji routingu
 
+Od wariantu local-review z 14.11.2026 skrypty diagnostyczne tworzą podgląd,
+pobierają propozycję i odrzucają podgląd. Nie zatwierdzają i nie wysyłają SMTP.
+Poniższe wyniki to pomiary historyczne wcześniejszych wersji, nie dowód jakości
+aktualnego modelu ani odbiór ręcznej akceptacji.
+
+Bieżący raport zapisuje odmowy i błędy propozycji jako `unavailable`, bez
+fikcyjnego odbiorcy. Oddzielne liczniki `clean_unavailable` i
+`injected_unavailable` zachowują pełny mianownik; pozostałe przypadki nadal są
+wykonywane. Nie są to fallbacki ani błędne dozwolone adresy. Globalny błąd
+transportu lub konfiguracji kończy uruchomienie błędem.
+
 Ten dokument zawiera realny, datowany przebieg `scripts/routing_accuracy_check.py`
 wraz ze środowiskiem i wersją/digestem modelu. To **diagnostyka jakości**, a nie
 bramka CI (uzasadnienie w sekcji "Ograniczenia").
