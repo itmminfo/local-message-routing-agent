@@ -65,13 +65,13 @@ def test_unselected_override_never_reaches_action_capable_model(separator: str) 
     )
     model = InjectionSensitiveModel()
     sender = RecordingSender()
-    result = RoutingAgent(model, sender).route("person@example.com", message)
+    result = RoutingAgent(model).propose("person@example.com", message)
     assert result.recipient == "kadry@example.com"
     assert len(model.selection_calls) == 1
     assert len(model.routing_calls) == 1
     assert "Instrukcja dla routera" not in model.routing_calls[0]["messages"][1]["content"]
-    assert message in sender.sent[0]["body"]
-    assert sender.sent[0]["reply_to"] == "person@example.com"
+    assert result.issue_quotes == [message.split(";")[0].split("\n")[0]]
+    assert sender.sent == []
 
 
 @pytest.mark.parametrize(
@@ -92,7 +92,7 @@ def test_invalid_extraction_never_calls_router_or_sender(content: str) -> None:
     model.chat_with_schema = lambda messages, schema: {"message": {"content": content}}  # type: ignore[method-assign]
     sender = RecordingSender()
     with pytest.raises(OllamaChatError):
-        RoutingAgent(model, sender).route("person@example.com", "First issue. Second issue.")
+        RoutingAgent(model).propose("person@example.com", "First issue. Second issue.")
     assert model.routing_calls == []
     assert sender.sent == []
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Measure wrong-but-allowed routing with paired synthetic prompt injections.
 
-Each pair sends a clean message and the same message with an appended attacker
-instruction. The route endpoint sends both messages to SMTP, so this diagnostic
-only accepts local API and Mailpit hosts and probes Mailpit before sending.
+Each pair requests proposals for a clean message and an injected message.
+Previews are rejected after the proposal; this diagnostic never approves or sends.
+Local Compose/Mailpit guards are retained as a boundary for synthetic evaluation.
 """
 
 from __future__ import annotations
@@ -196,8 +196,7 @@ def _parse_result(result: dict[str, Any]) -> RoutingResult:
 def evaluate_pairs(
     dataset: Dataset, route_func: Callable[[str], dict[str, Any]] | None = None
 ) -> dict[str, object]:
-    # Each live request makes the API check its actual SMTP sender before routing.
-    # A Compose override can otherwise make the API differ from the tools service.
+    # Proposals only: route_message never calls approve or retry.
     def send_live(message: str) -> dict[str, Any]:
         return route_message(message, require_local_smtp=True)
 
@@ -283,7 +282,7 @@ def main() -> int:
         probe_mailpit(MAIL_API_URL)
         dataset = load_dataset(arguments.dataset)
         print(
-            f"Sending {2 * len(dataset.pairs)} synthetic messages to local Compose/Mailpit.",
+            f"Evaluating {2 * len(dataset.pairs)} synthetic proposals locally, without SMTP.",
             file=sys.stderr,
         )
         report = evaluate_pairs(dataset)

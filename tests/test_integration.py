@@ -1,159 +1,98 @@
-import asyncio
-from typing import Any
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import httpx
-from app.main import app
-from fastapi import FastAPI
+import pytest
+from app.config import get_settings
+from app.main import create_app
+from fastapi.testclient import TestClient
 
 
-def request_app(
-    target_app: FastAPI,
-    method: str,
-    url: str,
-    **kwargs: Any,
-) -> httpx.Response:
-    async def call_app() -> httpx.Response:
-        transport = httpx.ASGITransport(app=target_app)
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="http://testserver",
-        ) as client:
-            return await client.request(method, url, **kwargs)
-
-    return asyncio.run(call_app())
-
-
-def ollama_tool_response(recipient: str) -> dict[str, Any]:
-    return {
+@pytest.mark.parametrize("valid_proposal", [True, False])
+def test_real_dependency_graph_only_sends_after_explicit_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, valid_proposal: bool
+) -> None:
+    monkeypatch.setenv("REVIEW_DATABASE_PATH", str(tmp_path / "review.sqlite3"))
+    get_settings.cache_clear()
+    response = MagicMock()
+    response.is_success = True
+    routing = {
         "message": {
             "tool_calls": [
                 {
                     "function": {
                         "name": "send_email",
                         "arguments": {
-                            "recipient": recipient,
-                            "subject": "Message routed to help-desk",
-                            "body": "Please help with this workstation issue.",
-                            "reason": "The message concerns a computer issue.",
+                            "recipient": "help-desk@example.com",
+                            "reason": "Computer issue.",
+                            "subject": "HIJACKED",
+                            "body": "SECRET-MODEL-PAYLOAD",
+                            "reply_to": "attacker@example.com",
                         },
                     }
                 }
             ]
         }
     }
-
-
-def test_route_message_wires_real_agent_ollama_client_and_mail_sender() -> None:
-    # Exercises the real dependency wiring in app/api/routes.py end to end:
-    # route -> MessageRoutingService -> RoutingAgent -> OllamaClient -> MailSender.
-    # Only the two external boundaries (Ollama HTTP and SMTP) are mocked, so a
-    # broken DI graph would fail here even though every layer passes its own
-    # unit tests.
-    ollama_response = MagicMock()
-    ollama_response.is_success = True
-    ollama_response.json.return_value = ollama_tool_response("help-desk@example.com")
-    ollama_response.json.side_effect = [
-        {"message": {"content": '{"issue_quotes":["Nie działa mi komputer"]}'}},
-        ollama_tool_response("help-desk@example.com"),
+    response.json.side_effect = [
+        {"message": {"content": '{"issue_quotes":["Nie działa komputer"]}'}},
+        *([routing] if valid_proposal else [{"message": {"content": "refusal"}}] * 2),
     ]
-
-    http_client = MagicMock()
-    http_client.post.return_value = ollama_response
-
+    http = MagicMock()
+    http.post.return_value = response
     smtp = MagicMock()
-
+    smtp.mail.return_value = (250, b"OK")
+    smtp.rcpt.return_value = (250, b"OK")
+    smtp.docmd.return_value = (354, b"continue")
+    smtp.getreply.return_value = (250, b"queued")
     with (
-        patch("app.infrastructure.ollama_client.httpx.Client") as client_class,
-        patch("app.infrastructure.mail_sender.smtplib.SMTP") as smtp_class,
+        patch("app.infrastructure.ollama_client.httpx.Client") as http_class,
+        patch("app.infrastructure.mail_sender.smtplib.SMTP", return_value=smtp) as smtp_class,
     ):
-        client_class.return_value.__enter__.return_value = http_client
-        smtp_class.return_value.__enter__.return_value = smtp
-
-        response = request_app(
-            app,
-            "POST",
-            "/api/v1/messages/route",
-            json={
-                "email": "jan.nowak@example.com",
-                "message": "Nie działa mi komputer",
-            },
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "sent"
-    assert body["recipient"] == "help-desk@example.com"
-    assert body["reply_to"] == "jan.nowak@example.com"
-    assert body["used_fallback"] is False
-
-    # The real OllamaClient actually posted to the Ollama chat endpoint...
-    assert http_client.post.call_count == 2
-    extraction_payload = http_client.post.call_args_list[0].kwargs["json"]
-    assert "format" in extraction_payload
-    assert "tools" not in extraction_payload
-    assert http_client.post.call_args.args[0].endswith("/api/chat")
-
-    # ...and the real MailSender actually delivered the routed email over SMTP
-    # with the application-controlled Reply-To, never a model-supplied value.
-    smtp.send_message.assert_called_once()
-    message = smtp.send_message.call_args.args[0]
-    assert message["To"] == "help-desk@example.com"
-    assert message["Reply-To"] == "jan.nowak@example.com"
-    assert message["From"] == "no-reply@local-message-routing-agent.test"
-    assert (
-        "Treść zgłoszenia:\nNie działa mi komputer\n\n"
-        "Uzasadnienie (AI): The message concerns a computer issue."
-    ) in message.get_content()
-
-
-def test_route_message_falls_back_to_other_when_model_returns_no_tool_call() -> None:
-    # Same real wiring, but the model never emits a tool call. After one retry
-    # the agent must fall back to other@example.com and still deliver an email.
-    no_tool_response = MagicMock()
-    no_tool_response.is_success = True
-    no_tool_response.json.return_value = {"message": {"content": "Plain text answer"}}
-    no_tool_response.json.side_effect = [
-        {"message": {"content": '{"issue_quotes":["Nie działa mi komputer"]}'}},
-        {"message": {"content": "Plain text answer"}},
-        {"message": {"content": "Plain text answer"}},
-    ]
-
-    http_client = MagicMock()
-    http_client.post.return_value = no_tool_response
-
-    smtp = MagicMock()
-
-    with (
-        patch("app.infrastructure.ollama_client.httpx.Client") as client_class,
-        patch("app.infrastructure.mail_sender.smtplib.SMTP") as smtp_class,
-    ):
-        client_class.return_value.__enter__.return_value = http_client
-        smtp_class.return_value.__enter__.return_value = smtp
-
-        response = request_app(
-            app,
-            "POST",
-            "/api/v1/messages/route",
-            json={
-                "email": "jan.nowak@example.com",
-                "message": "Nie działa mi komputer",
-            },
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "sent"
-    assert body["recipient"] == "other@example.com"
-    assert body["used_fallback"] is True
-
-    # Grounding call, then initial routing and one retry before fallback.
-    assert http_client.post.call_count == 3
-    smtp.send_message.assert_called_once()
-    message = smtp.send_message.call_args.args[0]
-    assert message["To"] == "other@example.com"
-    assert message["Reply-To"] == "jan.nowak@example.com"
-    content = message.get_content()
-    assert "Treść zgłoszenia:\nNie działa mi komputer\n\n" in content
-    assert "Przekierowanie awaryjne: Model nie wywołał żadnego narzędzia." in content
-    assert "Uzasadnienie (AI):" not in content
+        http_class.return_value.__enter__.return_value = http
+        with TestClient(create_app(), base_url="http://localhost") as client:
+            session = client.get("/api/v1/review/session").json()
+            headers = {"Origin": "http://localhost", "X-CSRF-Token": session["csrf_token"]}
+            preview = client.post(
+                "/api/v1/review/previews",
+                headers=headers,
+                json={"email": "person@example.com", "message": "Nie działa komputer"},
+            ).json()
+            assert preview["state"] == "pending_review"
+            http.post.assert_not_called()
+            smtp_class.assert_not_called()
+            path = "/api/v1/review/previews/" + preview["id"]
+            suggested = client.post(
+                path + "/suggest", headers=headers, json={"version": preview["version"]}
+            ).json()
+            assert suggested["suggestion"]["status"] == ("ready" if valid_proposal else "error")
+            assert suggested["recipient"] is None
+            smtp_class.assert_not_called()
+            # The operator may deliberately choose another department than the model.
+            approval = {
+                "version": preview["version"],
+                "payload_digest": preview["payload_digest"],
+                "recipient": "it@example.com",
+                "confirmed": True,
+            }
+            sent = client.post(path + "/approve", headers=headers, json=approval)
+            assert sent.status_code == 200, sent.text
+            assert sent.json()["state"] == "sent"
+            assert (
+                client.post(path + "/approve", headers=headers, json=approval).json()["state"]
+                == "sent"
+            )
+    assert http.post.call_count == (2 if valid_proposal else 3)
+    extraction = http.post.call_args_list[0].kwargs["json"]
+    assert "format" in extraction and "tools" not in extraction
+    smtp.send.assert_called_once()
+    message = BytesParser(policy=policy.default).parsebytes(smtp.send.call_args.args[0][:-3])
+    assert message["To"] == "it@example.com"
+    assert message["Reply-To"] == "person@example.com"
+    assert message["Message-ID"] == sent.json()["message_id"]
+    body = message.get_content().replace("\r\n", "\n")
+    assert "Treść zgłoszenia:\nNie działa komputer\n\n" in body
+    assert "Dział zatwierdzony przez operatora: it@example.com" in body
+    for attack in ("HIJACKED", "SECRET-MODEL-PAYLOAD", "attacker@example.com"):
+        assert attack not in str(message)

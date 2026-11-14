@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Reject requests whose declared body exceeds this many bytes before buffering,
     # so an oversized payload cannot be read into memory just to fail validation.
     MAX_REQUEST_BODY_BYTES: int = 65536
+    REVIEW_DATABASE_PATH: str = "/data/review.sqlite3"
+    REVIEW_ALLOWED_ORIGINS: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
+    REVIEW_SESSION_TTL_SECONDS: int = 28800
+    REVIEW_PREVIEW_TTL_SECONDS: int = 1800
 
     model_config = SettingsConfigDict(
         env_file=".env",

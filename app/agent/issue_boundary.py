@@ -50,7 +50,7 @@ def build_issue_selection_request(
     return messages, schema
 
 
-def selected_issue_text(response: dict[str, Any], message: str) -> str:
+def grounded_issue_quotes(response: dict[str, Any], message: str) -> list[str]:
     """Only the backend can copy original substrings into classifier input."""
     try:
         model_message = response["message"]
@@ -77,7 +77,11 @@ def selected_issue_text(response: dict[str, Any], message: str) -> str:
             end = start + length
     except (KeyError, TypeError, ValueError) as exc:
         raise OllamaChatError("Issue extraction did not provide valid grounded evidence.") from exc
-    return "\n".join(message[start : start + length] for start, length in spans)
+    return [message[start : start + length] for start, length in spans]
+
+
+def selected_issue_text(response: dict[str, Any], message: str) -> str:
+    return "\n".join(grounded_issue_quotes(response, message))
 
 
 def issue_selection_fingerprint() -> str:

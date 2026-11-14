@@ -37,50 +37,76 @@ def install_fake_stack(
     route_changes: dict[str, Any] | None = None,
     mail_changes: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Exercise main against fake HTTP boundaries, including call order and Mailpit body."""
     calls: list[str] = []
     mail_reads = 0
-    reason = "Wiadomość dotyczy niedziałającego komputera."
-    route_response: dict[str, Any] = {
-        "status": "sent",
+    record: dict[str, Any] = {
+        "id": "preview-id",
+        "version": 1,
+        "payload_digest": "a" * 64,
+        "state": "pending_review",
+        "attempts": [],
+        "recipient": None,
+        "suggestion": {"status": "not_requested"},
+        "message_id": "<stable-id@example.test>",
+    }
+    sent = {
+        **record,
+        "state": "sent",
         "recipient": module.EXPECTED_RECIPIENT,
-        "reason": reason,
-        "used_fallback": False,
+        "attempts": [{"id": "attempt-id"}],
     }
     if route_changes:
-        route_response.update(route_changes)
-    recipient = route_response["recipient"]
-    label = "Przekierowanie awaryjne" if route_response["used_fallback"] else "Uzasadnienie (AI)"
-    mail_detail: dict[str, Any] = {
-        "To": [{"Address": recipient}],
+        sent.update(route_changes)
+    mail_detail = {
+        "To": [{"Address": module.EXPECTED_RECIPIENT}],
         "ReplyTo": [{"Address": module.SENDER_EMAIL}],
+        "MessageID": "stable-id@example.test",
         "Text": (
-            "Automatyczne skierowanie zgłoszenia przez agenta AI.\n\n"
-            f"Nadawca: {module.SENDER_EMAIL}\nDział docelowy: {recipient}\n\n"
+            f"Dział zatwierdzony przez operatora: {module.EXPECTED_RECIPIENT}\n\n"
             f"Treść zgłoszenia:\n{module.ROUTE_MESSAGE}\n\n"
-            f"{label}: {route_response['reason']}\n"
         ),
     }
     if mail_changes:
         mail_detail.update(mail_changes)
 
-    def fake_ready() -> None:
-        calls.append("ready")
+    class FakeReviewClient:
+        def __init__(self, base_url: str, *, timeout: int) -> None:
+            assert base_url == module.API_BASE_URL
+            assert timeout == module.REQUEST_TIMEOUT_SECONDS
+
+        def start_session(self) -> dict[str, Any]:
+            calls.append("session")
+            return {"csrf_token": "test-csrf"}
+
+        def request(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            calls.append(f"{method} {path}")
+            if path == module.REVIEW_PATH:
+                assert payload == {"email": module.SENDER_EMAIL, "message": module.ROUTE_MESSAGE}
+                return record.copy()
+            if path.endswith("/suggest"):
+                assert payload == {"version": 1}
+                return {**record, "suggestion": {"status": "ready"}}
+            assert path == module.REVIEW_PATH + "/preview-id/approve"
+            assert payload == {
+                "version": 1,
+                "payload_digest": "a" * 64,
+                "recipient": module.EXPECTED_RECIPIENT,
+                "confirmed": True,
+            }
+            return sent.copy()
 
     def fake_request_json(method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
         nonlocal mail_reads
         calls.append(f"{method} {url}")
         if method == "GET" and url == f"{module.MAIL_API_URL}{module.MESSAGES_PATH}":
             mail_reads += 1
-            return {"messages": [] if mail_reads == 1 else [{"ID": "new-message"}]}
-        if method == "POST" and url == f"{module.API_BASE_URL}{module.ROUTE_PATH}":
-            assert payload == {"email": module.SENDER_EMAIL, "message": module.ROUTE_MESSAGE}
-            return route_response
+            return {"messages": [] if mail_reads <= 2 else [{"ID": "new-message"}]}
         if method == "GET" and url == f"{module.MAIL_API_URL}/api/v1/message/new-message":
             return mail_detail
         raise AssertionError(f"Unexpected request: {method} {url}")
 
-    monkeypatch.setattr(module, "wait_for_ready", fake_ready)
+    monkeypatch.setattr(module, "wait_for_ready", lambda: calls.append("ready"))
+    monkeypatch.setattr(module, "ReviewClient", FakeReviewClient)
     monkeypatch.setattr(module, "request_json", fake_request_json)
     return calls
 
@@ -95,7 +121,11 @@ def test_e2e_main_waits_for_ready_and_checks_api_and_delivered_mail(
     assert calls == [
         "ready",
         f"GET {module.MAIL_API_URL}{module.MESSAGES_PATH}",
-        f"POST {module.API_BASE_URL}{module.ROUTE_PATH}",
+        "session",
+        f"POST {module.REVIEW_PATH}",
+        f"GET {module.MAIL_API_URL}{module.MESSAGES_PATH}",
+        f"POST {module.REVIEW_PATH}/preview-id/approve",
+        f"POST {module.REVIEW_PATH}/preview-id/approve",
         f"GET {module.MAIL_API_URL}{module.MESSAGES_PATH}",
         f"GET {module.MAIL_API_URL}/api/v1/message/new-message",
     ]
@@ -108,7 +138,7 @@ def test_e2e_main_waits_for_ready_and_checks_api_and_delivered_mail(
         ({"Text": "Treść zgłoszenia:\ninna wiadomość\n\n"}, "original message"),
         (
             {"Text": "Treść zgłoszenia:\nNie działa mi komputer\n\nUzasadnienie (AI): błędne"},
-            "correctly labelled routing reason",
+            "operator-approved department",
         ),
         ({"ReplyTo": [{"Address": "wrong@example.com"}]}, "Reply-To is incorrect"),
         ({"To": [{"Address": "it@example.com"}]}, "Mailpit To does not match"),
@@ -141,16 +171,16 @@ def test_e2e_main_rejects_wrong_allowed_api_recipient(
     assert "expected 'help-desk@example.com'" in capsys.readouterr().err
 
 
-def test_e2e_main_accepts_correct_fallback_label(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_e2e_main_can_require_suggestion_before_manual_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = load_module()
-    monkeypatch.setattr(module, "EXPECTED_RECIPIENT", "other@example.com")
-    install_fake_stack(
-        module,
-        monkeypatch,
-        route_changes={"used_fallback": True, "reason": "Model nie wywołał narzędzia."},
-    )
-
+    monkeypatch.setattr(module, "REQUIRE_SUGGESTION", True)
+    calls = install_fake_stack(module, monkeypatch)
     assert module.main() == 0
+    assert calls.index(f"POST {module.REVIEW_PATH}/preview-id/suggest") < calls.index(
+        f"POST {module.REVIEW_PATH}/preview-id/approve"
+    )
 
 
 @pytest.mark.parametrize(

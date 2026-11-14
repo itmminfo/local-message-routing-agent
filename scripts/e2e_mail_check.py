@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
-"""End-to-end delivery + routing-correctness check against a running stack.
+"""Synthetic acceptance of local review and Mailpit delivery, never model accuracy.
 
-First waits for the API's /ready probe (Ollama API + model present + SMTP reachable)
-so a cold or still-starting stack does not race the request. Then sends one route
-request, reads Mailpit through its HTTP API, and verifies two distinct things:
-
-1. Delivery contract (always): a new message appeared, Reply-To matches the sender
-   email, To is exactly one allowed department recipient, the captured Mailpit
-   recipient matches the API response recipient, and the text body contains the
-   original message and correctly labelled routing reason.
-2. Routing correctness (one unambiguous case): the message routes to the EXPECTED
-   recipient, in both the API response and the captured Mailpit To header. This
-   catches a regression that misroutes (e.g. to it@ or the other@ fallback) instead
-   of passing as long as *some* allowed recipient was used. ROUTE_MESSAGE /
-   EXPECTED_RECIPIENT default to an in-prompt, single-intent case so a real model at
-   temperature 0 is effectively deterministic here; both are overridable by env.
-
-Assumes the Docker Compose environment is already running.
+Creates an immutable preview, proves no message arrived before approval, then
+explicitly approves EXPECTED_RECIPIENT as a test operator. Replaying the approval
+must not send another copy. This automated test does not prove human presence.
+Set REQUIRE_SUGGESTION=true to also check optional model proposal plumbing.
 """
 
 import json
@@ -33,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.domain.departments import ALLOWED_RECIPIENTS  # noqa: E402
 
+from scripts.review_client import ReviewClient  # noqa: E402
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 MAIL_API_URL = os.environ.get("MAIL_API_URL", "http://localhost:8025").rstrip("/")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "e2e-mail-check@example.com")
@@ -48,8 +38,9 @@ MAIL_POLL_TIMEOUT_SECONDS = int(os.environ.get("MAIL_POLL_TIMEOUT_SECONDS", "30"
 READY_TIMEOUT_SECONDS = int(os.environ.get("READY_TIMEOUT_SECONDS", "120"))
 READY_PROBE_TIMEOUT_SECONDS = int(os.environ.get("READY_PROBE_TIMEOUT_SECONDS", "5"))
 
-ROUTE_PATH = "/api/v1/messages/route"
-READY_PATH = "/ready"
+REVIEW_PATH = "/api/v1/review/previews"
+READY_PATH = "/health"
+REQUIRE_SUGGESTION = os.environ.get("REQUIRE_SUGGESTION", "false").lower() == "true"
 MESSAGES_PATH = "/api/v1/messages?limit=50"
 MESSAGE_DETAIL_PATH = "/api/v1/message/{message_id}"
 
@@ -143,7 +134,14 @@ def probe_ready(url: str) -> bool:
     # starting) is a "keep waiting" signal, not a hard failure, so this never calls
     # fail(); only an unexpected scheme would. Returns True only on 200 + ready.
     require_http_url(url)
-    request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Host": urllib.parse.urlsplit(os.environ.get("REVIEW_ORIGIN", API_BASE_URL)).netloc,
+        },
+        method="GET",
+    )
     try:
         with urllib.request.urlopen(  # nosec B310
             request, timeout=READY_PROBE_TIMEOUT_SECONDS
@@ -159,7 +157,7 @@ def probe_ready(url: str) -> bool:
         parsed = json.loads(body)
     except json.JSONDecodeError:
         return False
-    return isinstance(parsed, dict) and parsed.get("status") == "ready"
+    return isinstance(parsed, dict) and parsed.get("status") == "ok"
 
 
 def wait_for_ready() -> None:
@@ -175,104 +173,83 @@ def wait_for_ready() -> None:
 def main() -> int:
     if EXPECTED_RECIPIENT not in ALLOWED_RECIPIENTS:
         fail(f"EXPECTED_RECIPIENT is not an allowed recipient: {EXPECTED_RECIPIENT!r}")
-
     wait_for_ready()
-
     baseline = request_json("GET", f"{MAIL_API_URL}{MESSAGES_PATH}")
     baseline_ids = {message_id(message) for message in messages_from_response(baseline)}
-
-    route_response = request_json(
-        "POST",
-        f"{API_BASE_URL}{ROUTE_PATH}",
-        {"email": SENDER_EMAIL, "message": ROUTE_MESSAGE},
-    )
-
-    if route_response.get("status") != "sent":
-        fail(f"API does not return status sent: {route_response!r}")
-
-    api_recipient = route_response.get("recipient")
-    if not isinstance(api_recipient, str):
-        fail(f"API response recipient is missing or not a string: {route_response!r}")
-
-    if api_recipient not in ALLOWED_RECIPIENTS:
-        fail(f"API recipient is outside allowed recipients: {api_recipient!r}")
-
-    # Routing correctness (distinct from the delivery contract above): an unambiguous
-    # message must reach a specific department, so misrouting to the wrong department
-    # or the other@ fallback fails here instead of passing as "some allowed recipient".
-    if api_recipient != EXPECTED_RECIPIENT:
-        fail(f"API routed {ROUTE_MESSAGE!r} to {api_recipient!r}, expected {EXPECTED_RECIPIENT!r}.")
-
-    new_summary = None
+    client = ReviewClient(API_BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS)
+    try:
+        client.start_session()
+        preview = client.request(
+            "POST", REVIEW_PATH, {"email": SENDER_EMAIL, "message": ROUTE_MESSAGE}
+        )
+        if preview.get("state") != "pending_review" or preview.get("attempts") != []:
+            fail("Creating a preview must return pending_review without delivery attempts.")
+        path = f"{REVIEW_PATH}/{preview['id']}"
+        if REQUIRE_SUGGESTION:
+            preview = client.request("POST", f"{path}/suggest", {"version": preview["version"]})
+            if preview.get("suggestion", {}).get("status") != "ready":
+                fail("The optional proposal did not succeed.")
+        before = request_json("GET", f"{MAIL_API_URL}{MESSAGES_PATH}")
+        if {message_id(item) for item in messages_from_response(before)} != baseline_ids:
+            fail("Mail appeared before explicit approval.")
+        approval = {
+            "version": preview["version"],
+            "payload_digest": preview["payload_digest"],
+            "recipient": EXPECTED_RECIPIENT,
+            "confirmed": True,
+        }
+        sent = client.request("POST", f"{path}/approve", approval)
+        replay = client.request("POST", f"{path}/approve", approval)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        fail(f"Review request failed: {exc}")
+    if sent.get("state") != "sent" or replay.get("state") != "sent":
+        fail(f"Approval did not confirm Mailpit delivery: {sent!r}, replay={replay!r}")
+    if sent.get("recipient") != EXPECTED_RECIPIENT:
+        fail(f"API recipient must equal expected {EXPECTED_RECIPIENT!r}: {sent.get('recipient')!r}")
+    if len(sent.get("attempts", [])) != 1 or len(replay.get("attempts", [])) != 1:
+        fail("Replay started another delivery attempt.")
+    if sent.get("message_id") != replay.get("message_id"):
+        fail("Replay changed the stable Message-ID.")
+    new_messages = []
     deadline = time.time() + MAIL_POLL_TIMEOUT_SECONDS
     while time.time() < deadline:
         current = request_json("GET", f"{MAIL_API_URL}{MESSAGES_PATH}")
         new_messages = [
-            message
-            for message in messages_from_response(current)
-            if message_id(message) not in baseline_ids
+            item for item in messages_from_response(current) if message_id(item) not in baseline_ids
         ]
         if new_messages:
-            new_summary = new_messages[0]
             break
         time.sleep(1)
-
-    if new_summary is None:
-        fail("No new message appeared in Mailpit after the API request.")
-
-    encoded_id = urllib.parse.quote(message_id(new_summary), safe="")
-    detail_url = f"{MAIL_API_URL}{MESSAGE_DETAIL_PATH.format(message_id=encoded_id)}"
-    detail = request_json("GET", detail_url)
-
+    if len(new_messages) != 1:
+        fail(f"Expected exactly one new message after approval/replay, got {len(new_messages)}.")
+    encoded_id = urllib.parse.quote(message_id(new_messages[0]), safe="")
+    detail = request_json(
+        "GET", f"{MAIL_API_URL}{MESSAGE_DETAIL_PATH.format(message_id=encoded_id)}"
+    )
     to_addresses = addresses(detail.get("To"))
     reply_to_addresses = addresses(detail.get("ReplyTo"))
-
-    if len(reply_to_addresses) != 1 or reply_to_addresses[0] != SENDER_EMAIL:
+    if to_addresses != [EXPECTED_RECIPIENT]:
+        fail(f"Mailpit To does not match approved recipient: {to_addresses!r}")
+    if reply_to_addresses != [SENDER_EMAIL]:
         fail(f"Reply-To is incorrect: {reply_to_addresses!r}")
-
-    if len(to_addresses) != 1:
-        fail(f"Expected exactly one Mailpit To address, got: {to_addresses!r}")
-
-    if to_addresses[0] not in ALLOWED_RECIPIENTS:
-        fail(f"Mailpit To is outside allowed recipients: {to_addresses!r}")
-
-    if to_addresses[0] != api_recipient:
-        fail(
-            "Mailpit To does not match API recipient: "
-            f"API recipient={api_recipient!r}, Mailpit recipient={to_addresses[0]!r}"
-        )
-
-    # The captured To must also be the expected department: closes the routing-
-    # correctness check on the mail itself, not only on the API response.
-    if to_addresses[0] != EXPECTED_RECIPIENT:
-        fail(
-            f"Mailpit To {to_addresses[0]!r} does not match "
-            f"expected recipient {EXPECTED_RECIPIENT!r}."
-        )
-
     mail_text = detail.get("Text")
     if not isinstance(mail_text, str) or not mail_text.strip():
         fail("Mailpit did not capture a non-empty text body.")
     mail_text = normalize_newlines(mail_text)
-    original_message = normalize_newlines(ROUTE_MESSAGE)
-    if f"Treść zgłoszenia:\n{original_message}\n\n" not in mail_text:
+    original = normalize_newlines(ROUTE_MESSAGE)
+    if f"Treść zgłoszenia:\n{original}\n\n" not in mail_text:
         fail("Mailpit text body does not contain the original message in its template.")
-
-    reason = route_response.get("reason")
-    used_fallback = route_response.get("used_fallback")
-    if not isinstance(reason, str) or not reason.strip() or not isinstance(used_fallback, bool):
-        fail("API response does not include a usable reason and fallback status.")
-    reason_label = "Przekierowanie awaryjne" if used_fallback else "Uzasadnienie (AI)"
-    if not mail_text.rstrip("\n").endswith(f"{reason_label}: {normalize_newlines(reason)}"):
-        fail("Mailpit text body does not end with the correctly labelled routing reason.")
-
-    print(f"Message: {ROUTE_MESSAGE}")
-    print(f"Expected recipient: {EXPECTED_RECIPIENT}")
-    print(f"API recipient: {api_recipient}")
-    print(f"Mailpit recipient: {to_addresses[0]}")
-    print(f"Reply-To: {reply_to_addresses[0]}")
-    print("Mailpit text body: OK")
-    print("Routing correctness: OK")
+    if f"Dział zatwierdzony przez operatora: {EXPECTED_RECIPIENT}" not in mail_text:
+        fail("Mailpit text body does not include the operator-approved department.")
+    # Mailpit's MessageID strips the RFC angle brackets.
+    if str(detail.get("MessageID", "")).strip("<>") != str(sent["message_id"]).strip("<>"):
+        fail("Mailpit Message-ID does not match the persisted attempt.")
+    print(f"Preview: {preview['id']}")
+    print(f"Approved recipient: {EXPECTED_RECIPIENT}")
+    print(f"Message-ID: {sent['message_id']}")
+    print("Before approval: no mail. After approval and replay: exactly one mail.")
+    print("Mailpit To / Reply-To / immutable original / operator approval: OK")
+    print("This is synthetic approval testing; model accuracy and human presence are not measured.")
     return 0
 
 

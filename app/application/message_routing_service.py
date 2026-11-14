@@ -1,35 +1,21 @@
-from typing import Protocol
+from typing import NoReturn, Protocol
 
-from app.agent.routing_agent import RouteResult
-from app.schemas.messages import MessageRouteRequest, MessageRouteResponse
+from app.agent.routing_agent import ReviewRequiredError, RoutingProposal
+from app.schemas.messages import MessageRouteRequest
 
 
-class SupportsRoute(Protocol):
-    """Minimal contract the service needs from a routing agent."""
-
-    def route(self, sender_email: str, message: str) -> RouteResult: ...
+class SupportsPropose(Protocol):
+    def propose(self, sender_email: str, message: str) -> RoutingProposal: ...
 
 
 class MessageRoutingService:
-    def __init__(self, routing_agent: SupportsRoute) -> None:
+    """Legacy callers cannot send; the review service owns approved delivery."""
+
+    def __init__(self, routing_agent: SupportsPropose) -> None:
         self.routing_agent = routing_agent
 
-    def route_message(
-        self,
-        request: MessageRouteRequest,
-    ) -> MessageRouteResponse:
-        result = self.routing_agent.route(
-            sender_email=str(request.email),
-            message=request.message,
-        )
+    def propose_message(self, request: MessageRouteRequest) -> RoutingProposal:
+        return self.routing_agent.propose(str(request.email), request.message)
 
-        return MessageRouteResponse(
-            status=result.status,
-            recipient=result.recipient,
-            reply_to=result.reply_to,
-            subject=result.subject,
-            reason=result.reason,
-            used_fallback=result.used_fallback,
-            model=result.model,
-            routing_confidence=result.routing_confidence,
-        )
+    def route_message(self, request: MessageRouteRequest) -> NoReturn:
+        raise ReviewRequiredError("Human review is required before delivery.")

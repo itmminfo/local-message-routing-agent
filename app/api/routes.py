@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import smtplib
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,11 +10,9 @@ from app.application.message_routing_service import MessageRoutingService
 from app.config import get_settings
 from app.infrastructure.mail_sender import MailSender
 from app.infrastructure.ollama_client import (
-    OllamaChatError,
     OllamaClient,
-    OllamaUnavailableError,
 )
-from app.schemas.messages import ErrorResponse, MessageRouteRequest, MessageRouteResponse
+from app.schemas.messages import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +60,6 @@ def get_routing_agent(
 ) -> RoutingAgent:
     return RoutingAgent(
         ollama_client=ollama_client,
-        mail_sender=mail_sender,
     )
 
 
@@ -100,89 +96,13 @@ async def ready(
 
 @api_router.post(
     "/messages/route",
-    response_model=MessageRouteResponse,
-    summary="Route a message to an internal department",
-    description=(
-        "Accepts a sender email and message, asks Ollama to call the "
-        "`send_email` tool, validates the selected recipient, and sends the "
-        "message through SMTP. `Reply-To` is always set by the application "
-        "from the original request email."
-    ),
-    responses={
-        400: {
-            "description": "The request could not be processed.",
-            "model": ErrorResponse,
-        },
-        413: {
-            "description": "Request body too large.",
-            "model": ErrorResponse,
-        },
-        422: {"description": "Validation error."},
-        429: {
-            "description": "Too many concurrent routing requests.",
-            "model": ErrorResponse,
-        },
-        502: {
-            "description": (
-                "Upstream failure: the Ollama chat request failed, or the email "
-                "could not be delivered via SMTP."
-            ),
-            "model": ErrorResponse,
-        },
-        503: {
-            "description": "Ollama is unavailable.",
-            "model": ErrorResponse,
-        },
-    },
     tags=["messages"],
+    deprecated=True,
+    status_code=409,
+    responses={
+        409: {"description": "Human review is required before delivery.", "model": ErrorResponse}
+    },
 )
-def route_message(
-    request: MessageRouteRequest,
-    service: MessageRoutingService = Depends(get_message_routing_service),
-) -> MessageRouteResponse:
-    if not _route_semaphore.acquire(blocking=False):
-        raise HTTPException(
-            status_code=429,
-            detail="Too many concurrent routing requests; retry shortly.",
-        )
-    try:
-        return service.route_message(request)
-    except OllamaUnavailableError as exc:
-        raise HTTPException(status_code=503, detail="Ollama is unavailable.") from exc
-    except OllamaChatError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Ollama chat request failed.",
-        ) from exc
-    except (smtplib.SMTPException, OSError) as exc:
-        raise HTTPException(status_code=502, detail="Email delivery failed.") from exc
-    except ValueError as exc:
-        # Defensive boundary: the recipient is already validated against the enum and
-        # headers are CRLF-sanitized upstream, so a ValueError here is unexpected.
-        # Return a generic 400 and log the cause server-side instead of leaking it.
-        logger.warning("Rejected message route request: %s", exc)
-        raise HTTPException(
-            status_code=400,
-            detail="The request could not be processed.",
-        ) from exc
-    finally:
-        _route_semaphore.release()
-
-
-@api_router.post(
-    "/messages/route-local-eval",
-    response_model=MessageRouteResponse,
-    include_in_schema=False,
-)
-def route_message_local_eval(
-    request: MessageRouteRequest,
-    service: MessageRoutingService = Depends(get_message_routing_service),
-    mail_sender: MailSender = Depends(get_mail_sender),
-) -> MessageRouteResponse:
-    # A dedicated path fails closed against an older API image: it returns 404
-    # rather than ignoring a new safety header and sending through external SMTP.
-    # FastAPI reuses get_mail_sender within the request, so this is the sender
-    # the routing service will use for delivery.
-    if mail_sender.smtp_host != "mailpit" or mail_sender.smtp_port != 1025:
-        raise HTTPException(status_code=409, detail="Local Mailpit SMTP is required.")
-    return route_message(request, service)
+@api_router.post("/messages/route-local-eval", include_in_schema=False, status_code=409)
+def route_message() -> None:
+    raise HTTPException(status_code=409, detail="Human review is required before delivery.")

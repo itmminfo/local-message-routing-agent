@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Diagnostic routing report against a real model and a keyword baseline.
 
-Sends a set of labeled messages to the running API and prints, per case, where
-the model routed the message. It is a diagnostic, not a pass/fail gate.
+Creates previews, requests suggestions, then rejects the previews without SMTP.
+Prints the model proposal for each labeled case. It is a diagnostic, not a pass/fail gate.
 
 The report has three parts:
 
@@ -21,12 +21,10 @@ The report has three parts:
 Assumes the Docker Compose environment is already running.
 """
 
-import json
 import os
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +33,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.domain.departments import ALLOWED_RECIPIENTS  # noqa: E402
 
 from scripts.mock_ollama import classify as keyword_baseline  # noqa: E402
+from scripts.review_client import ReviewClient  # noqa: E402
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000").rstrip("/")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "routing-accuracy@example.com")
-ROUTE_URL = f"{API_BASE_URL}/api/v1/messages/route"
-LOCAL_EVAL_ROUTE_URL = f"{API_BASE_URL}/api/v1/messages/route-local-eval"
+REVIEW_PATH = "/api/v1/review/previews"
 # Default is generous so a cold or CPU-only inference does not time out.
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "180"))
 
@@ -256,24 +254,18 @@ BOUNDARY_CASES: list[tuple[str, tuple[str, ...]]] = [
 
 
 def route(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
-    payload = json.dumps({"email": SENDER_EMAIL, "message": message}, ensure_ascii=False).encode(
-        "utf-8"
-    )
-    target_url = LOCAL_EVAL_ROUTE_URL if require_local_smtp else ROUTE_URL
-    require_http_url(target_url)
-    request = urllib.request.Request(
-        target_url,
-        data=payload,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(  # nosec B310
-        request, timeout=REQUEST_TIMEOUT_SECONDS
-    ) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    if not isinstance(data, dict):
-        raise SystemExit(f"ERROR: API did not return a JSON object for {message!r}")
-    return data
+    # Compatibility argument retained for the older evaluator. This path has no
+    # approve/retry call and cannot send mail, regardless of the model's decision.
+    client = ReviewClient(API_BASE_URL, timeout=REQUEST_TIMEOUT_SECONDS)
+    client.start_session()
+    preview = client.request("POST", REVIEW_PATH, {"email": SENDER_EMAIL, "message": message})
+    path = f"{REVIEW_PATH}/{preview['id']}"
+    result = client.request("POST", f"{path}/suggest", {"version": preview["version"]})
+    suggestion = result.get("suggestion")
+    client.request("POST", f"{path}/reject", {"version": result["version"]})
+    if not isinstance(suggestion, dict) or suggestion.get("status") != "ready":
+        raise ValueError(f"No valid model suggestion for {message!r}: {suggestion!r}")
+    return dict(suggestion)
 
 
 def route_message(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
@@ -284,6 +276,8 @@ def route_message(message: str, *, require_local_smtp: bool = False) -> dict[str
         raise SystemExit(f"ERROR: API returned HTTP {exc.code} for {message!r}: {body}") from exc
     except urllib.error.URLError as exc:
         raise SystemExit(f"ERROR: API call failed for {message!r}: {exc.reason}") from exc
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {exc}") from exc
     except OSError as exc:
         # Read timeouts, connection resets and other socket errors urllib does
         # not wrap in URLError.
