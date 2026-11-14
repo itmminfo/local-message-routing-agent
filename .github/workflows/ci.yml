@@ -35,6 +35,9 @@ jobs:
       - name: Test (pytest)
         run: pytest
 
+      - name: Test review UI state recovery (Node, no dependencies)
+        run: node --test tests/review_ui.test.cjs
+
       - name: Audit runtime and dev dependencies (pip-audit)
         run: pip-audit -r requirements.lock -r requirements-dev.lock
 
@@ -50,7 +53,11 @@ jobs:
       - name: Check runtime image contains only application inputs
         run: >-
           docker run --rm --entrypoint sh local-message-routing-agent:ci -c
-          'test -f /app/app/main.py && test -f /app/scripts/e2e_mail_check.py &&
+          'test -f /app/app/main.py && test -f /app/app/review/store.py &&
+          test -f /app/app/web/static/review.js && test -f /app/scripts/review_client.py &&
+          test -f /app/scripts/e2e_mail_check.py &&
+          test -f /app/scripts/adversarial_eval.py &&
+          test -f /app/scripts/data/adversarial_pairs_v1.json &&
           test ! -e /app/tests && test ! -e /app/README.md &&
           test ! -e /app/SECURITY.md && test ! -e /app/.env'
 
@@ -60,8 +67,8 @@ jobs:
           image: local-message-routing-agent:ci
 
   e2e-compose:
-    # Proves the full container pipeline end to end (api -> Ollama tool call ->
-    # Mailpit, with /ready gating and correct headers) without pulling a multi-GB
+    # Proves the full container pipeline end to end (preview -> proposal -> synthetic approval ->
+    # Mailpit, with correct headers and replay protection) without pulling a multi-GB
     # model: docker-compose.ci.yml swaps Ollama for a deterministic mock. This is a
     # plumbing proof, not a model-accuracy check (accuracy: docs/eval.md).
     runs-on: ubuntu-latest
@@ -74,7 +81,7 @@ jobs:
       - name: Start the stack (mocked Ollama)
         run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
 
-      - name: Run the E2E delivery + routing check
+      - name: Run the review approval and Mailpit delivery check
         run: >-
           docker compose -f docker-compose.yml -f docker-compose.ci.yml
           run --rm tools scripts/e2e_mail_check.py

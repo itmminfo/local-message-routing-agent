@@ -24,3 +24,10 @@ dist/
 
 # Local Claude Code settings, not part of the deliverable
 .claude/
+
+# Persistent local review records contain original messages and session tokens.
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3.lock

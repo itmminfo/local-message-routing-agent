@@ -1,0 +1,19 @@
+services:
+  api:
+    environment:
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      REQUEST_TIMEOUT_SECONDS: "600"
+  ollama:
+    cpus: 6
+    mem_limit: 10g
+  ollama-init:
+    environment:
+      OLLAMA_MODEL_EXPECTED_DIGEST: "357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b"
+      OLLAMA_WARMUP_TIMEOUT_SECONDS: "600"
+      OLLAMA_WAIT_TIMEOUT_SECONDS: "600"
+  tools:
+    environment:
+      EVAL_SMTP_HOST: mailpit
+      EVAL_SMTP_PORT: "1025"
+      REQUEST_TIMEOUT_SECONDS: "600"

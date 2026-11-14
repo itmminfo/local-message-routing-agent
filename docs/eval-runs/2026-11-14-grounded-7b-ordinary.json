@@ -1,0 +1,785 @@
+{
+  "token": "8728adac39",
+  "provenance": {
+    "commit": "11a1ac5facb1242ebdac1d98ce5c0f6e0ce8bcdd",
+    "git_tree": "fdaa2db8bf59dcafb87d8c34521487a5e17888d6",
+    "selected_model": "qwen2.5:7b",
+    "selected_model_digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+    "runtime": {
+      "config": {
+        "MAX_CONCURRENT_ROUTE_REQUESTS": 1,
+        "OLLAMA_HOST": "http://ollama:11434",
+        "OLLAMA_MODEL": "qwen2.5:7b",
+        "OLLAMA_NUM_PREDICT": 512,
+        "REQUEST_TIMEOUT_SECONDS": 600,
+        "SMTP_HOST": "mailpit",
+        "SMTP_PORT": 1025
+      },
+      "extraction_prompt": "a0e1c266e85e",
+      "files": {
+        "app/__init__.py": "50b9d6e95ea2893b00c0639ef082414bd2b5bb642400e94819844ecdd00e92ec",
+        "app/agent/__init__.py": "57a39a26dde46e1bfdc4ab86e18ff8bc9055a6515efbe9aa59726d9df7a61898",
+        "app/agent/issue_boundary.py": "e9a609aebf495ee53cd8ff3f243729d969393060d1e52cd5a595ca1dfdbde11c",
+        "app/agent/prompts.py": "71a857105f555967117758a80a30ee143391a4e81d9b5e4d385068a077278330",
+        "app/agent/routing_agent.py": "f889afde1222d6d1ace956c00ae17921d99d47aea7d7a8f9152be1a8db4e8abc",
+        "app/agent/tool_schema.py": "5db863bffab316cd5b6c4484f371dc2c7f87f84ae367802465d964e8527543b3",
+        "app/api/__init__.py": "f0fb9371b1cd8cfc6c932060ed0d717ca86442f93601f15e988730dd81722cb1",
+        "app/api/routes.py": "744ebda62fef4912631734aac6a82339c679e02602cad21ebdddf2d716aa6c3f",
+        "app/application/__init__.py": "8ead370fe249ce8460c1bfef38cc1e18ed0cd9abfe1f741dd3e819b6c6a15d96",
+        "app/application/message_routing_service.py": "88193e5298aeb368c745c0e3908db092c7deb7c190108a75c8a30c0e7c1a89c4",
+        "app/config.py": "01727d0e729ea885b886fb1d38a82656c258501594b1d046b4d8d85abcd84411",
+        "app/domain/__init__.py": "114921c16cb0908e7a523a58bdf1b35e3f0b012e27002ccbd05941c507eca2d2",
+        "app/domain/departments.py": "59f7c907c6e884144c76523fecf5b68281b25910f589102a03b8bc52fb6a81bf",
+        "app/domain/routing_policy.py": "720b927969bcafeec1cec25b35c6da773ad24f996832c790e584ac389dd0da5c",
+        "app/infrastructure/__init__.py": "ca9241c133ecfd79c580191ebb78b809b569eaf235a4ef7e170ee35d19fc6620",
+        "app/infrastructure/mail_sender.py": "019e47d700f865b15e4cb0529a0a2c9deb876a8682adfdf70bf0f48a1d29af05",
+        "app/infrastructure/ollama_client.py": "701f9b6c86ca36478167a36177720f13e4dcc43f429231e7ecaaafa390dc6096",
+        "app/main.py": "3f6d2ca8dffb026b09e8b0e8c69d7ec75bdf4a3edf9335a58acb2f3848ab1164",
+        "app/observability.py": "58df98d627734d91003811f7bf78360033c202532175c90f7d91056d9f4ac96c",
+        "app/schemas/__init__.py": "5d6b4f27c156de60c4b2ba74b07c43a14c87f9f5ddb51be719a818effa7c671a",
+        "app/schemas/messages.py": "e579067380fcf4ebabcb9e4531529f9c667b0afca2bfa545c7b0445aa782db64",
+        "scripts/__init__.py": "bb1dbe5bfad34649a62ba27373a7a56fa81dc2170ba1416a2f598a68f0177929",
+        "scripts/adversarial_eval.py": "340f3ba1fdd0af0336d9531b409c829375accae05cef4abaa0195fabe0ee1457",
+        "scripts/data/adversarial_holdout_v1.json": "c07eb22942c5e56b42fdd75d1c136583e5c82cf2a35d1a439cd7c3cce61fef82",
+        "scripts/data/adversarial_pairs_v1.json": "b6c68592e231ebe81faf22aae8a7c8a9210d00e6c22e11cbd75a389aa8de9e53",
+        "scripts/e2e_mail_check.py": "ccf4e85b35a77319a6165f9e79f0c0798f0d9855828f42f4b49206b9dbe07688",
+        "scripts/mock_ollama.py": "84d1318f8af03d89c3be052c050ab26d31b0133d69ecf02fd90d1c07bea6260d",
+        "scripts/routing_accuracy_check.py": "4f1d11c3a4d222386cbc774596455bb25f493c0771fb4cf387cc7796c9aae82a"
+      },
+      "routing_prompt": "39ca0f98cff3",
+      "runtime_source_sha256": "90d554892575073d53dd60e249bec39a1778fbbedc1c5bba1c54d71ebf43b623"
+    },
+    "options": {
+      "temperature": 0,
+      "num_predict": 512,
+      "seed": null
+    }
+  },
+  "cases": [
+    {
+      "category": "CASES",
+      "message": "Chcialbym zglosic urlop na jutro",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-cases-0@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "kadry@example.com",
+          "reply_to": "ordinary-8728adac39-cases-0@example.com",
+          "subject": "Zgłoszenie skierowane do: kadry@example.com",
+          "reason": "Wiadomość dotyczy urlopu.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "5HDP7cthqk1YO0EwqMY41r"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Potrzebuje zaswiadczenia o zatrudnieniu",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-cases-1@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "kadry@example.com",
+          "reply_to": "ordinary-8728adac39-cases-1@example.com",
+          "subject": "Zgłoszenie skierowane do: kadry@example.com",
+          "reason": "Wiadomość dotyczy zaświadczenia o zatrudnieniu.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "72p3UMlQmUi6rU0XXaTVE0"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Nie zgadza mi sie wynagrodzenie",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-cases-2@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "kadry@example.com",
+          "reply_to": "ordinary-8728adac39-cases-2@example.com",
+          "subject": "Zgłoszenie skierowane do: kadry@example.com",
+          "reason": "Wiadomość dotyczy wynagrodzenia.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "3TEFCObYBUQio5bn4mo5QU"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Mam pytanie o proces rekrutacji",
+      "expected": "human-resources@example.com",
+      "email": "ordinary-8728adac39-cases-3@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "human-resources@example.com",
+          "reply_to": "ordinary-8728adac39-cases-3@example.com",
+          "subject": "Zgłoszenie skierowane do: human-resources@example.com",
+          "reason": "Wiadomość dotyczy procesu rekrutacji.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "6BxHUPuqwo0sucNxeekoOR"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Chcialbym zapytac o benefity pracownicze",
+      "expected": "human-resources@example.com",
+      "email": "ordinary-8728adac39-cases-4@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "human-resources@example.com",
+          "reply_to": "ordinary-8728adac39-cases-4@example.com",
+          "subject": "Zgłoszenie skierowane do: human-resources@example.com",
+          "reason": "Wiadomość dotyczy benefity pracownicze.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "574FMJLcQQ5ATT8b6Y6RkM"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Nie dziala mi komputer",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-cases-5@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "help-desk@example.com",
+          "reply_to": "ordinary-8728adac39-cases-5@example.com",
+          "subject": "Zgłoszenie skierowane do: help-desk@example.com",
+          "reason": "Wiadomość dotyczy niedziałającego sprzętu.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "1Nn9thXZcpEJwErE8PzkbW"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Drukarka nie drukuje",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-cases-6@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "help-desk@example.com",
+          "reply_to": "ordinary-8728adac39-cases-6@example.com",
+          "subject": "Zgłoszenie skierowane do: help-desk@example.com",
+          "reason": "Wiadomość dotyczy nieprawidłowego działania drukarki.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "4PBUJ0exEtc0xlz4cW3RrR"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Laptop nie chce sie uruchomic",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-cases-7@example.com",
+      "outcome": {
+        "status": 502,
+        "error": "{\"detail\":\"Ollama chat request failed.\"}"
+      },
+      "mailpit_ids": []
+    },
+    {
+      "category": "CASES",
+      "message": "Nie moge zalogowac sie do platformy szkoleniowej",
+      "expected": "it@example.com",
+      "email": "ordinary-8728adac39-cases-8@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "it@example.com",
+          "reply_to": "ordinary-8728adac39-cases-8@example.com",
+          "subject": "Zgłoszenie skierowane do: it@example.com",
+          "reason": "Problem z logowaniem się do platformy szkoleniowej.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "71Dai2SRxKIkyYDL2hRoSf"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Aplikacja zwraca blad 500",
+      "expected": "it@example.com",
+      "email": "ordinary-8728adac39-cases-9@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "it@example.com",
+          "reply_to": "ordinary-8728adac39-cases-9@example.com",
+          "subject": "Zgłoszenie skierowane do: it@example.com",
+          "reason": "Wiadomość dotyczy błędu systemowego.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "5z95MQdm7bF7038vexLAjR"
+      ]
+    },
+    {
+      "category": "CASES",
+      "message": "Mam sprawe organizacyjna",
+      "expected": "other@example.com",
+      "email": "ordinary-8728adac39-cases-10@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "other@example.com",
+          "reply_to": "ordinary-8728adac39-cases-10@example.com",
+          "subject": "Zgłoszenie skierowane do: other@example.com",
+          "reason": "Wiadomość dotyczy sprawy organizacyjnej.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "low"
+        }
+      },
+      "mailpit_ids": [
+        "6pBviz9HDY7HkR4oDX1R7v"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Od kiedy nalicza sie ekwiwalent za niewykorzystany urlop",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-0@example.com",
+      "outcome": {
+        "status": 502,
+        "error": "{\"detail\":\"Ollama chat request failed.\"}"
+      },
+      "mailpit_ids": []
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Prosze o korekte liczby nadgodzin w grafiku za maj",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-1@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "kadry@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-1@example.com",
+          "subject": "Zgłoszenie skierowane do: kadry@example.com",
+          "reason": "Zapytanie dotyczy poprawy danych dotyczących nadgodzin w grafiku.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "47ZbtB9AwmvfUnefJepD5H"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Czy moj aneks do umowy jest juz podpisany",
+      "expected": "kadry@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-2@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "kadry@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-2@example.com",
+          "subject": "Zgłoszenie skierowane do: kadry@example.com",
+          "reason": "Wiadomość dotyczy dokumentu formalnego związanego z pracodawcą.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "3moNkf1YcdrGJUUqXiiYUl"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Chcialbym polecic znajomego na otwarty wakat",
+      "expected": "human-resources@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-3@example.com",
+      "outcome": {
+        "status": 502,
+        "error": "{\"detail\":\"Ollama chat request failed.\"}"
+      },
+      "mailpit_ids": []
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Jak zapisac sie na szkolenie z przywodztwa",
+      "expected": "human-resources@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-4@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "human-resources@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-4@example.com",
+          "subject": "Zgłoszenie skierowane do: human-resources@example.com",
+          "reason": "Wiadomość dotyczy zgłoszenia na szkolenie.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "5NsX7PjBxqbx3TfEYkRJiq"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Czy karta sportowa obejmuje osobe towarzyszaca",
+      "expected": "human-resources@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-5@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "human-resources@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-5@example.com",
+          "subject": "Zgłoszenie skierowane do: human-resources@example.com",
+          "reason": "Wiadomość dotyczy zasady karty sportowej dla towarzysza.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "7TK2x9WKkFI8BsxhCMiE8Q"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Mysz bezprzewodowa nie reaguje po wymianie baterii",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-6@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "help-desk@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-6@example.com",
+          "subject": "Zgłoszenie skierowane do: help-desk@example.com",
+          "reason": "Wiadomość dotyczy lokalnego sprzętu komputerowego.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "7YXVhK3EZ2PYUrxRYGlYhV"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Zaciecie papieru w drukarce na trzecim pietrze",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-7@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "help-desk@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-7@example.com",
+          "subject": "Zgłoszenie skierowane do: help-desk@example.com",
+          "reason": "Wiadomość dotyczy problemu z drukarką.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "6vNnMQtRLIYDeH8PjSsyx7"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Drugi monitor pokazuje tylko czarny ekran",
+      "expected": "help-desk@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-8@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "help-desk@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-8@example.com",
+          "subject": "Zgłoszenie skierowane do: help-desk@example.com",
+          "reason": "Wiadomość dotyczy niefuncjonalnego drugiego monitora.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "6kf8qN50rI4Yq5AD9sNWjb"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Po resecie hasla nadal dostaje access denied w CRM",
+      "expected": "it@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-9@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "it@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-9@example.com",
+          "subject": "Zgłoszenie skierowane do: it@example.com",
+          "reason": "Problem z dostępem do systemu CRM po zmianie hasła.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "0IdvT49ujmPYaH9173LmE8"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Potrzebuje uprawnien do repozytorium git zespolu",
+      "expected": "it@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-10@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "it@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-10@example.com",
+          "subject": "Zgłoszenie skierowane do: it@example.com",
+          "reason": "Wiadomość dotyczy dostępu do systemu.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "4FBrsbq4sBLmek7IcZlV3S"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Integracja z API platnosci zwraca blad 401",
+      "expected": "it@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-11@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "it@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-11@example.com",
+          "subject": "Zgłoszenie skierowane do: it@example.com",
+          "reason": "Wiadomość dotyczy błędu dotyczącego integracji API płatności.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "high"
+        }
+      },
+      "mailpit_ids": [
+        "25MxmoRrn5y3ORFgqhfaxu"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Gdzie moge zaparkowac rower na terenie biura",
+      "expected": "other@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-12@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "other@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-12@example.com",
+          "subject": "Zgłoszenie skierowane do: other@example.com",
+          "reason": "Wiadomość dotyczy lokalizacji parkowania roweru, nie pasuje do żadnej z listowanych kategorii.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "low"
+        }
+      },
+      "mailpit_ids": [
+        "6H2goDVuj0gNwB3aSQ3hif"
+      ]
+    },
+    {
+      "category": "HELD_OUT_CASES",
+      "message": "Mam pytanie o parking dla gosci",
+      "expected": "other@example.com",
+      "email": "ordinary-8728adac39-held_out_cases-13@example.com",
+      "outcome": {
+        "status": 200,
+        "body": {
+          "status": "sent",
+          "recipient": "other@example.com",
+          "reply_to": "ordinary-8728adac39-held_out_cases-13@example.com",
+          "subject": "Zgłoszenie skierowane do: other@example.com",
+          "reason": "Wiadomość dotyczy nieobsługiwanego tematu.",
+          "used_fallback": false,
+          "model": "qwen2.5:7b",
+          "routing_confidence": "low"
+        }
+      },
+      "mailpit_ids": [
+        "6fN1GuCpcRCDRv53Nk35Tr"
+      ]
+    }
+  ],
+  "summary": {
+    "total": 25,
+    "correct_without_fallback": 22,
+    "refusals": 3,
+    "fallbacks": 0,
+    "wrong_recipient": 0,
+    "mailpit_matching_to": 22
+  },
+  "mailpit_readback": [
+    {
+      "id": "6fN1GuCpcRCDRv53Nk35Tr",
+      "to": [
+        "other@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-13@example.com"
+      ]
+    },
+    {
+      "id": "6H2goDVuj0gNwB3aSQ3hif",
+      "to": [
+        "other@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-12@example.com"
+      ]
+    },
+    {
+      "id": "25MxmoRrn5y3ORFgqhfaxu",
+      "to": [
+        "it@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-11@example.com"
+      ]
+    },
+    {
+      "id": "4FBrsbq4sBLmek7IcZlV3S",
+      "to": [
+        "it@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-10@example.com"
+      ]
+    },
+    {
+      "id": "0IdvT49ujmPYaH9173LmE8",
+      "to": [
+        "it@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-9@example.com"
+      ]
+    },
+    {
+      "id": "6kf8qN50rI4Yq5AD9sNWjb",
+      "to": [
+        "help-desk@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-8@example.com"
+      ]
+    },
+    {
+      "id": "6vNnMQtRLIYDeH8PjSsyx7",
+      "to": [
+        "help-desk@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-7@example.com"
+      ]
+    },
+    {
+      "id": "7YXVhK3EZ2PYUrxRYGlYhV",
+      "to": [
+        "help-desk@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-6@example.com"
+      ]
+    },
+    {
+      "id": "7TK2x9WKkFI8BsxhCMiE8Q",
+      "to": [
+        "human-resources@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-5@example.com"
+      ]
+    },
+    {
+      "id": "5NsX7PjBxqbx3TfEYkRJiq",
+      "to": [
+        "human-resources@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-4@example.com"
+      ]
+    },
+    {
+      "id": "3moNkf1YcdrGJUUqXiiYUl",
+      "to": [
+        "kadry@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-2@example.com"
+      ]
+    },
+    {
+      "id": "47ZbtB9AwmvfUnefJepD5H",
+      "to": [
+        "kadry@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-held_out_cases-1@example.com"
+      ]
+    },
+    {
+      "id": "6pBviz9HDY7HkR4oDX1R7v",
+      "to": [
+        "other@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-10@example.com"
+      ]
+    },
+    {
+      "id": "5z95MQdm7bF7038vexLAjR",
+      "to": [
+        "it@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-9@example.com"
+      ]
+    },
+    {
+      "id": "71Dai2SRxKIkyYDL2hRoSf",
+      "to": [
+        "it@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-8@example.com"
+      ]
+    },
+    {
+      "id": "4PBUJ0exEtc0xlz4cW3RrR",
+      "to": [
+        "help-desk@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-6@example.com"
+      ]
+    },
+    {
+      "id": "1Nn9thXZcpEJwErE8PzkbW",
+      "to": [
+        "help-desk@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-5@example.com"
+      ]
+    },
+    {
+      "id": "574FMJLcQQ5ATT8b6Y6RkM",
+      "to": [
+        "human-resources@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-4@example.com"
+      ]
+    },
+    {
+      "id": "6BxHUPuqwo0sucNxeekoOR",
+      "to": [
+        "human-resources@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-3@example.com"
+      ]
+    },
+    {
+      "id": "3TEFCObYBUQio5bn4mo5QU",
+      "to": [
+        "kadry@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-2@example.com"
+      ]
+    },
+    {
+      "id": "72p3UMlQmUi6rU0XXaTVE0",
+      "to": [
+        "kadry@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-1@example.com"
+      ]
+    },
+    {
+      "id": "5HDP7cthqk1YO0EwqMY41r",
+      "to": [
+        "kadry@example.com"
+      ],
+      "reply_to": [
+        "ordinary-8728adac39-cases-0@example.com"
+      ]
+    }
+  ]
+}

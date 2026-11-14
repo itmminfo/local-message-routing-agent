@@ -50,6 +50,26 @@ class OllamaClient:
             "options": {"temperature": 0, "num_predict": self.num_predict},
         }
 
+        return self._chat(payload)
+
+    def chat_with_schema(
+        self,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        # No tools are available while the model reads the raw untrusted message.
+        return self._chat(
+            {
+                "model": self.model,
+                "messages": messages,
+                "format": schema,
+                "stream": False,
+                "options": {"temperature": 0, "num_predict": self.num_predict},
+            }
+        )
+
+    def _chat(self, payload: dict[str, Any]) -> dict[str, Any]:
+
         # Network-level retries/backoff are intentionally omitted in this PoC: a
         # transient transport error surfaces as HTTP 503 and the caller can retry.
         # The agent-level retry handles malformed tool calls, not connectivity.

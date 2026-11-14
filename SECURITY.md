@@ -1,7 +1,8 @@
 # Zgłaszanie podatności
 
 Wspierana jest bieżąca gałąź `main`. To lokalny PoC: domyślna konfiguracja wiąże
-porty z `127.0.0.1`, nie ma uwierzytelniania ani produkcyjnego dostawcy poczty.
+porty z `127.0.0.1`, ma lokalną sesję operatora i obowiązkową akceptację. Nie ma publicznego
+systemu kont ani produkcyjnego dostawcy poczty.
 Granice zaufania i znane ryzyka opisuje [docs/security.md](docs/security.md).
 
 Podatność zgłoś prywatnie przez **Security > Report a vulnerability** na GitHubie.
