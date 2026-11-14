@@ -35,6 +35,11 @@ Model może się mylić, także wskazując adres z dozwolonej listy. Wysoki conf
 nie jest miarą poprawności. Akceptacja dotyczy zapisanego oryginału i wybranego
 działu; propozycja nie zmienia ich po zatwierdzeniu.
 
+Ekstrakcja przyjmuje najwyżej osiem unikalnych cytatów. Backend znajduje ich
+dosłowne, rozłączne wystąpienia, także przy powtarzających się frazach, i układa je
+w kolejności źródła. Brak poprawnego przypisania daje brak propozycji, bez SMTP.
+Ten limit ogranicza koszt walidacji; nie stanowi dowodu trafności wyboru modelu.
+
 Dozwolone działy: `human-resources@example.com`, `kadry@example.com`,
 `help-desk@example.com`, `it@example.com`, `other@example.com`.
 `Reply-To` pochodzi wyłącznie ze zwalidowanego oryginalnego adresu nadawcy.
@@ -136,7 +141,8 @@ Node jest potrzebny wyłącznie do testów zachowania rzeczywistego JavaScriptu
 formularza. Testy korzystają z biblioteki standardowej, bez pakietów npm.
 
 E2E używa danych syntetycznych i sam pełni rolę testowego operatora. Sprawdza brak
-maila przed zgodą, dokładne To/Reply-To/oryginał po zgodzie i jedną kopię po replay.
+maila przed zgodą, dokładne To/Reply-To/Subject, całą zatwierdzoną treść, poprawny
+Message-ID i jedną kopię po replay.
 Nie jest dowodem, że zatwierdzał człowiek, ani pomiarem jakości modelu.
 
 ```sh
@@ -150,6 +156,12 @@ docker compose run --rm tools scripts/adversarial_eval.py
 korzysta z deterministycznej atrapy Ollamy i testuje tę ścieżkę. Rzeczywiste
 historyczne pomiary jakości znajdują się w [docs/eval.md](docs/eval.md); nie są
 wynikiem odbioru ręcznego preview. Zbiory oryginalny i holdout pozostają bez zmian.
+
+Normalna odmowa lub błąd propozycji nie przerywa diagnostyki. Raport zapisuje
+`unavailable` bez adresata i osobno liczy `clean_unavailable` oraz
+`injected_unavailable`. Taki wynik nie jest trafieniem, fallbackiem do other ani
+błędnym dozwolonym przełączeniem. Mianowniki nadal obejmują cały zbiór. Błąd
+transportu lub konfiguracji może przerwać uruchomienie i nie jest wynikiem modelu.
 
 ## Licencja
 

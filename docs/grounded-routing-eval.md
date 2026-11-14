@@ -1,5 +1,10 @@
 # Lokalny routing z weryfikacją cytatów, 14 listopada 2026
 
+Ten raport opisuje historyczny commit wskazany poniżej, sprzed obowiązkowego
+review. Bieżący lokalny przepływ wymaga ręcznej zgody i trwałego rejestru, co opisuje
+[odbiór preview](local-review-acceptance.md). Poniższe wyniki oraz dawna semantyka
+HTTP/SMTP nie są wynikiem obecnej wersji walidatora ani obecnej wysyłki.
+
 **Wynik jest częściowy. Automatyczny routing nie spełnia warunku odbioru.**
 Brak błędnego adresata w dostarczonych wiadomościach nie zastępuje trafności
 całego zbioru. Odmowy HTTP 502 są liczone osobno, nie jako poprawna klasyfikacja.

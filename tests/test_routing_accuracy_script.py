@@ -111,6 +111,36 @@ def test_run_clear_cut_cases_counts_all_hits(
     assert f"Hits: {total}/{total}" in out
 
 
+@pytest.mark.parametrize("kind", ["clear", "challenge", "boundary"])
+def test_accuracy_diagnostics_count_unavailable_without_shortening_denominator(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    module = load_module()
+    calls: list[str] = []
+
+    def fake_route(message: str) -> dict[str, object]:
+        calls.append(message)
+        return {"status": "error", "recipient": None, "error": "No valid model proposal"}
+
+    monkeypatch.setattr(module, "route_message", fake_route)
+    if kind == "clear":
+        module.run_clear_cut_cases()
+        total = len(module.CASES)
+        expected = f"Hits: 0/{total}   Fallbacks: 0/{total}   Unavailable: {total}/{total}"
+    elif kind == "challenge":
+        module.run_challenge_cases()
+        total = len(module.CHALLENGE_CASES)
+        expected = f"fallbacks=0/{total} unavailable={total}/{total}"
+    else:
+        module.run_boundary_cases()
+        total = len(module.BOUNDARY_CASES)
+        expected = f"Boundary unavailable: {total}/{total}"
+    assert len(calls) == total
+    out = capsys.readouterr().out
+    assert expected in out
+    assert out.count("Proposal unavailable: No valid model proposal") == total
+
+
 def test_run_boundary_cases_resolves_within_acceptable_set(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

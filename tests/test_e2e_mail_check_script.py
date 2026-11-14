@@ -22,6 +22,15 @@ def load_module() -> ModuleType:
     return module
 
 
+def complete_message_text(module: ModuleType) -> str:
+    return (
+        "Wiadomość przekazana po lokalnym zatwierdzeniu.\n\n"
+        f"Nadawca: {module.SENDER_EMAIL}\n"
+        f"Dział zatwierdzony przez operatora: {module.EXPECTED_RECIPIENT}\n\n"
+        f"Treść zgłoszenia:\n{module.ROUTE_MESSAGE}\n\n"
+    )
+
+
 def test_e2e_mail_check_imports_and_reuses_domain_recipients() -> None:
     module = load_module()
 
@@ -61,10 +70,8 @@ def install_fake_stack(
         "To": [{"Address": module.EXPECTED_RECIPIENT}],
         "ReplyTo": [{"Address": module.SENDER_EMAIL}],
         "MessageID": "stable-id@example.test",
-        "Text": (
-            f"Dział zatwierdzony przez operatora: {module.EXPECTED_RECIPIENT}\n\n"
-            f"Treść zgłoszenia:\n{module.ROUTE_MESSAGE}\n\n"
-        ),
+        "Subject": f"Zgłoszenie skierowane do: {module.EXPECTED_RECIPIENT}",
+        "Text": complete_message_text(module),
     }
     if mail_changes:
         mail_detail.update(mail_changes)
@@ -169,6 +176,83 @@ def test_e2e_main_rejects_wrong_allowed_api_recipient(
         module.main()
 
     assert "expected 'help-desk@example.com'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("where", ["before", "after", "duplicate"])
+def test_e2e_rejects_unapproved_body_outside_the_correct_original(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], where: str
+) -> None:
+    module = load_module()
+    good = complete_message_text(module)
+    altered = {
+        "before": "UNAPPROVED HEADER\n" + good,
+        "after": good + "UNAPPROVED EXTRA CONTENT\n",
+        "duplicate": good + good,
+    }[where]
+    install_fake_stack(module, monkeypatch, mail_changes={"Text": altered})
+    with pytest.raises(SystemExit):
+        module.main()
+    assert "complete approved message template" in capsys.readouterr().err
+
+
+def test_e2e_rejects_correct_fragments_but_wrong_sender_in_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_module()
+    altered = complete_message_text(module).replace(module.SENDER_EMAIL, "attacker@example.com")
+    install_fake_stack(module, monkeypatch, mail_changes={"Text": altered})
+    with pytest.raises(SystemExit):
+        module.main()
+    assert "complete approved message template" in capsys.readouterr().err
+
+
+def test_e2e_rejects_wrong_mail_subject(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_module()
+    install_fake_stack(module, monkeypatch, mail_changes={"Subject": "Wrong subject"})
+    with pytest.raises(SystemExit):
+        module.main()
+    assert "Subject" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "id@example.test",
+        "<@example.test>",
+        "<id@>",
+        "<a@b> <c@d>",
+        "<bad id@example.test>",
+        "<id@example.test>\r\nBcc: attacker@example.com",
+    ],
+    ids=["missing", "empty", "bare", "no-local", "no-domain", "multiple", "spaces", "injection"],
+)
+def test_e2e_rejects_missing_or_invalid_stable_message_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], value: object
+) -> None:
+    module = load_module()
+    install_fake_stack(
+        module, monkeypatch, route_changes={"message_id": value}, mail_changes={"MessageID": value}
+    )
+    with pytest.raises(SystemExit):
+        module.main()
+    assert "valid RFC Message-ID" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "value", [None, "", "<<<stable-id@example.test>>>", "another@example.test"]
+)
+def test_e2e_rejects_missing_or_different_captured_message_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], value: object
+) -> None:
+    module = load_module()
+    install_fake_stack(module, monkeypatch, mail_changes={"MessageID": value})
+    with pytest.raises(SystemExit):
+        module.main()
+    assert "Mailpit Message-ID does not match" in capsys.readouterr().err
 
 
 def test_e2e_main_can_require_suggestion_before_manual_approval(

@@ -96,3 +96,33 @@ Nie odtworzono bezpośredniego obejścia serwerowej zgody w sprawdzonym zakresie
 Nie deklarujemy dowodu fizycznej obecności człowieka, exactly-once ani odporności
 na dowolne awarie dysku/zasilania. Nadal tylko lokalny Mailpit. PR #4 pozostaje
 osobną decyzją; review i poprawki nie oznaczają zgody na merge.
+
+## Review całego PR #5 po dołączeniu lokalnego preview
+
+Przegląd względem gałęzi adversarial-eval obejmował również pierwotną ekstrakcję
+cytatów i diagnostykę. Potwierdzone i naprawione:
+
+- Walidator zawsze brał pierwsze wystąpienie frazy, więc legalne powtórzenie mogło
+  dawać fałszywe nakładanie. Dobór rozłącznych wystąpień ma teraz ograniczony DP
+  i kanoniczną kolejność. Maksymalnie osiem cytatów, 256 stanów i 1024 wyszukania.
+- Zwykły status błędu propozycji przerywał cały raport. Teraz unavailable ma własne
+  liczniki i pełne mianowniki, bez udawania odbiorcy lub fallbacku.
+- E2E mógł przepuścić dopisany tekst lub puste Message-ID. Teraz porównuje całą
+  niezależnie opisaną treść, Subject i prawidłowe stabilne identyfikatory.
+
+Regresje najpierw były czerwone. 348 testów Python i 32 testy JavaScriptu przeszły,
+wraz z Ruff, mypy, Bandit, pip-audit obu locków, buildem i Compose. Własny oracle
+cytatów sprawdził 3906 kombinacji, dodatkowa kontrola 51492; gate diagnostyki i E2E
+ma 13 zabitych mutacji. Zamrożone zestawy i etykiety pozostały bez zmian.
+
+Odizolowany realny Mailpit potwierdził dwa E2E z pełnym body i jedną kopią po replay.
+Diagnostyka ukończyła 40/40 niedostępnych propozycji przy wyłączonym modelu oraz
+40/40 propozycji deterministycznej atrapy, bez SMTP. Krótkie wywołanie rzeczywistego
+Qwen 7B po rozgrzaniu dało poprawną propozycję zwykłego przypadku; zimny start
+przekroczył 90-sekundowy limit testowy i został jawnie oznaczony jako niedostępny.
+Nie zmienia to historycznych wyników jakości, nie jest nowym odbiorem 20/20.
+
+Fingerprint ekstrakcji tej wersji: 5744c07e0e20. Historyczne raporty wcześniejszego
+fingerprintu nie opisują bieżącej jakości. Gotowość dotyczy lokalnego przepływu
+z obowiązkową zgodą i Mailpit. Automatyczny wybór działu nadal nie jest odebrany.
+PR #4 pozostaje do osobnej decyzji. Przygotowanie PR #5 nie oznacza jego scalenia.

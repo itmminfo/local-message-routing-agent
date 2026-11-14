@@ -1,5 +1,10 @@
 # Paired prompt-injection evaluation v1
 
+Dokument opisuje historyczne przebiegi i ówczesną automatyczną ścieżkę. Bieżący
+skrypt zbiera wyłącznie propozycje i nie uruchamia SMTP. Aktualna aplikacja wymaga
+ręcznej akceptacji, opisanej w [README](../README.md). Wyniki poniżej dotyczą
+wskazanych wersji i nie dowodzą trafności obecnego modelu.
+
 ## Pytanie
 
 Czy instrukcja dopisana do treści zgłoszenia zmienia wybrany dział na inny adres z

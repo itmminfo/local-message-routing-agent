@@ -2,7 +2,13 @@ import json
 from typing import Any
 
 import pytest
-from app.agent.issue_boundary import selected_issue_text
+from app.agent.issue_boundary import (
+    ISSUE_SELECTION_PROMPT,
+    MAX_ISSUE_QUOTES,
+    build_issue_selection_request,
+    grounded_issue_quotes,
+    selected_issue_text,
+)
 from app.agent.routing_agent import RoutingAgent
 from app.infrastructure.ollama_client import OllamaChatError
 
@@ -126,4 +132,58 @@ def test_overlapping_quotes_are_rejected() -> None:
         selected_issue_text(
             {"message": {"content": '{"issue_quotes":["First issue.","issue."]}'}},
             "First issue.",
+        )
+
+
+@pytest.mark.parametrize("reverse_model_order", [False, True])
+def test_repeated_phrase_uses_its_disjoint_occurrence(reverse_model_order: bool) -> None:
+    original = 'Aplikacja pokazuje komunikat "Brak uprawnień". Brak uprawnień'
+    expected = ['Aplikacja pokazuje komunikat "Brak uprawnień".', "Brak uprawnień"]
+    quotes = list(reversed(expected)) if reverse_model_order else expected
+
+    assert selected_issue_text(
+        {"message": {"content": json.dumps({"issue_quotes": quotes})}}, original
+    ) == "\n".join(expected)
+
+
+def test_quote_assignment_can_place_a_shorter_quote_after_its_container() -> None:
+    assert grounded_issue_quotes(
+        {"message": {"content": '{"issue_quotes":["a","ab"]}'}}, "aba"
+    ) == ["ab", "a"]
+
+
+def test_ambiguous_source_assignment_does_not_depend_on_model_array_order() -> None:
+    results = [
+        grounded_issue_quotes(
+            {"message": {"content": json.dumps({"issue_quotes": quotes})}}, "baba"
+        )
+        for quotes in (["a", "ba"], ["ba", "a"])
+    ]
+    assert results[0] == results[1]
+
+
+def test_source_occurrences_preserve_unicode_and_crlf_bytes() -> None:
+    quotes = ["Żółć", "Żądanie: „Żółć”\r\n"]
+    original = "Żądanie: „Żółć”\r\nŻółć"
+    assert grounded_issue_quotes(
+        {"message": {"content": json.dumps({"issue_quotes": quotes})}}, original
+    ) == ["Żądanie: „Żółć”\r\n", "Żółć"]
+
+
+def test_quote_limit_is_enforced_by_schema_prompt_and_backend() -> None:
+    quotes = list("abcdefghi")
+    original = " ".join(quotes)
+    _, schema = build_issue_selection_request(original)
+    assert schema["properties"]["issue_quotes"]["maxItems"] == MAX_ISSUE_QUOTES
+    assert f"at most {MAX_ISSUE_QUOTES}" in ISSUE_SELECTION_PROMPT
+    assert (
+        grounded_issue_quotes(
+            {"message": {"content": json.dumps({"issue_quotes": quotes[:MAX_ISSUE_QUOTES]})}},
+            original,
+        )
+        == quotes[:MAX_ISSUE_QUOTES]
+    )
+    with pytest.raises(OllamaChatError):
+        grounded_issue_quotes(
+            {"message": {"content": json.dumps({"issue_quotes": quotes})}}, original
         )

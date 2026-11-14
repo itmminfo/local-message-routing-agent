@@ -14,6 +14,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.headerregistry import BaseHeader
+from email.parser import HeaderParser
+from email.policy import default
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -54,6 +57,22 @@ def normalize_newlines(value: str) -> str:
     # EmailMessage and Mailpit normalize body line endings independently of the
     # original API payload. Compare equivalent text instead of raw CRLF bytes.
     return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def require_message_id(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.isascii()
+        or not value.startswith("<")
+        or not value.endswith(">")
+        or "\r" in value
+        or "\n" in value
+    ):
+        fail("API did not return a valid RFC Message-ID.")
+    header = HeaderParser(policy=default).parsestr(f"Message-ID: {value}\n\n")["Message-ID"]
+    if not isinstance(header, BaseHeader) or header.defects:
+        fail("API did not return a valid RFC Message-ID.")
+    return value
 
 
 _ALLOWED_URL_SCHEMES = ("http", "https")
@@ -208,7 +227,8 @@ def main() -> int:
         fail(f"API recipient must equal expected {EXPECTED_RECIPIENT!r}: {sent.get('recipient')!r}")
     if len(sent.get("attempts", [])) != 1 or len(replay.get("attempts", [])) != 1:
         fail("Replay started another delivery attempt.")
-    if sent.get("message_id") != replay.get("message_id"):
+    stable_message_id = require_message_id(sent.get("message_id"))
+    if stable_message_id != replay.get("message_id"):
         fail("Replay changed the stable Message-ID.")
     new_messages = []
     deadline = time.time() + MAIL_POLL_TIMEOUT_SECONDS
@@ -232,6 +252,8 @@ def main() -> int:
         fail(f"Mailpit To does not match approved recipient: {to_addresses!r}")
     if reply_to_addresses != [SENDER_EMAIL]:
         fail(f"Reply-To is incorrect: {reply_to_addresses!r}")
+    if detail.get("Subject") != f"Zgłoszenie skierowane do: {EXPECTED_RECIPIENT}":
+        fail("Mailpit Subject does not match the approved recipient.")
     mail_text = detail.get("Text")
     if not isinstance(mail_text, str) or not mail_text.strip():
         fail("Mailpit did not capture a non-empty text body.")
@@ -241,8 +263,16 @@ def main() -> int:
         fail("Mailpit text body does not contain the original message in its template.")
     if f"Dział zatwierdzony przez operatora: {EXPECTED_RECIPIENT}" not in mail_text:
         fail("Mailpit text body does not include the operator-approved department.")
-    # Mailpit's MessageID strips the RFC angle brackets.
-    if str(detail.get("MessageID", "")).strip("<>") != str(sent["message_id"]).strip("<>"):
+    expected_text = (
+        "Wiadomość przekazana po lokalnym zatwierdzeniu.\n\n"
+        f"Nadawca: {SENDER_EMAIL}\n"
+        f"Dział zatwierdzony przez operatora: {EXPECTED_RECIPIENT}\n\n"
+        f"Treść zgłoszenia:\n{original}\n\n"
+    )
+    if mail_text != expected_text:
+        fail("Mailpit text body does not match the complete approved message template.")
+    # Mailpit normally strips the RFC angle brackets; do not coerce missing IDs.
+    if detail.get("MessageID") not in (stable_message_id, stable_message_id[1:-1]):
         fail("Mailpit Message-ID does not match the persisted attempt.")
     print(f"Preview: {preview['id']}")
     print(f"Approved recipient: {EXPECTED_RECIPIENT}")

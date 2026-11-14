@@ -263,9 +263,20 @@ def route(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
     result = client.request("POST", f"{path}/suggest", {"version": preview["version"]})
     suggestion = result.get("suggestion")
     client.request("POST", f"{path}/reject", {"version": result["version"]})
-    if not isinstance(suggestion, dict) or suggestion.get("status") != "ready":
-        raise ValueError(f"No valid model suggestion for {message!r}: {suggestion!r}")
+    if not isinstance(suggestion, dict) or suggestion.get("status") not in {"ready", "error"}:
+        raise ValueError(f"Invalid suggestion response for {message!r}: {suggestion!r}")
+    if suggestion.get("status") == "error" and suggestion.get("recipient") is not None:
+        raise ValueError("An unavailable suggestion must not select a recipient")
     return dict(suggestion)
+
+
+def is_unavailable(result: dict[str, Any]) -> bool:
+    return result.get("status") == "error"
+
+
+def unavailable_reason(result: dict[str, Any]) -> str:
+    error = result.get("error")
+    return error if isinstance(error, str) and error.strip() else "No valid model proposal"
 
 
 def route_message(message: str, *, require_local_smtp: bool = False) -> dict[str, Any]:
@@ -287,6 +298,7 @@ def route_message(message: str, *, require_local_smtp: bool = False) -> dict[str
 def _run_clear_cut_set(title: str, cases: list[tuple[str, str]]) -> None:
     hits = 0
     fallbacks = 0
+    unavailable = 0
     total = len(cases)
 
     print(title)
@@ -296,11 +308,15 @@ def _run_clear_cut_set(title: str, cases: list[tuple[str, str]]) -> None:
 
         result = route_message(message)
         recipient = result.get("recipient")
-        used_fallback = bool(result.get("used_fallback"))
+        missing = is_unavailable(result)
+        used_fallback = not missing and bool(result.get("used_fallback"))
         if used_fallback:
             fallbacks += 1
 
-        if recipient == expected:
+        if missing:
+            unavailable += 1
+            verdict = "UNAVAILABLE"
+        elif recipient == expected:
             hits += 1
             verdict = "HIT"
         elif used_fallback:
@@ -309,9 +325,14 @@ def _run_clear_cut_set(title: str, cases: list[tuple[str, str]]) -> None:
             verdict = "MISS"
 
         print(f"[{verdict:11}] expected={expected:28} got={recipient} :: {message}")
+        if missing:
+            print(f"  Proposal unavailable: {unavailable_reason(result)}")
 
     print()
-    print(f"Hits: {hits}/{total}   Fallbacks: {fallbacks}/{total}")
+    print(
+        f"Hits: {hits}/{total}   Fallbacks: {fallbacks}/{total}   "
+        f"Unavailable: {unavailable}/{total}"
+    )
 
 
 def run_clear_cut_cases() -> None:
@@ -341,6 +362,7 @@ def run_challenge_cases() -> None:
     model_hits = 0
     baseline_hits = 0
     fallbacks = 0
+    unavailable = 0
     by_category: dict[str, list[int]] = {}
 
     print("Challenge cases (authored, fixed labels; model vs keyword baseline):")
@@ -350,41 +372,53 @@ def run_challenge_cases() -> None:
 
         result = route_message(message)
         recipient = result.get("recipient")
-        used_fallback = bool(result.get("used_fallback"))
+        missing = is_unavailable(result)
+        used_fallback = not missing and bool(result.get("used_fallback"))
         baseline = keyword_baseline(message)
-        model_hit = recipient == expected
+        model_hit = not missing and recipient == expected
         baseline_hit = baseline == expected
         model_hits += model_hit
         baseline_hits += baseline_hit
         fallbacks += used_fallback
-        counts = by_category.setdefault(category, [0, 0, 0])
+        unavailable += missing
+        counts = by_category.setdefault(category, [0, 0, 0, 0])
         counts[0] += model_hit
         counts[1] += baseline_hit
         counts[2] += 1
+        counts[3] += missing
 
-        model_verdict = "HIT" if model_hit else "MISS"
+        model_verdict = "UNAVAILABLE" if missing else ("HIT" if model_hit else "MISS")
         baseline_verdict = "HIT" if baseline_hit else "MISS"
         print(
-            f"[{category:13}] model={model_verdict:4} {recipient:28} "
+            f"[{category:13}] model={model_verdict:11} {str(recipient):28} "
             f"baseline={baseline_verdict:4} {baseline:28} expected={expected} "
             f":: {message}"
         )
+        if missing:
+            print(f"  Proposal unavailable: {unavailable_reason(result)}")
 
     total = len(CHALLENGE_CASES)
     print()
     print(
         f"Challenge total: model={model_hits}/{total} "
-        f"baseline={baseline_hits}/{total} fallbacks={fallbacks}/{total}"
+        f"baseline={baseline_hits}/{total} fallbacks={fallbacks}/{total} "
+        f"unavailable={unavailable}/{total}"
     )
-    for category, (category_model_hits, category_baseline_hits, count) in by_category.items():
+    for category, (
+        category_model_hits,
+        category_baseline_hits,
+        count,
+        category_unavailable,
+    ) in by_category.items():
         print(
             f"  {category}: model={category_model_hits}/{count} "
-            f"baseline={category_baseline_hits}/{count}"
+            f"baseline={category_baseline_hits}/{count} unavailable={category_unavailable}/{count}"
         )
 
 
 def run_boundary_cases() -> None:
     resolved = 0
+    unavailable = 0
     total = len(BOUNDARY_CASES)
 
     print("Boundary cases (undefined seams; any listed recipient is acceptable):")
@@ -395,9 +429,13 @@ def run_boundary_cases() -> None:
 
         result = route_message(message)
         recipient = result.get("recipient")
-        used_fallback = bool(result.get("used_fallback"))
+        missing = is_unavailable(result)
+        used_fallback = not missing and bool(result.get("used_fallback"))
 
-        if recipient in acceptable:
+        if missing:
+            unavailable += 1
+            verdict = "UNAVAILABLE"
+        elif recipient in acceptable:
             resolved += 1
             verdict = "OK-FALLBACK" if used_fallback else "OK"
         elif used_fallback:
@@ -407,9 +445,12 @@ def run_boundary_cases() -> None:
 
         accept_str = " | ".join(acceptable)
         print(f"[{verdict:11}] acceptable={accept_str} -> got={recipient} :: {message}")
+        if missing:
+            print(f"  Proposal unavailable: {unavailable_reason(result)}")
 
     print()
     print(f"Boundary resolved within acceptable set: {resolved}/{total}")
+    print(f"Boundary unavailable: {unavailable}/{total}")
     print(
         "Boundary cases never count as failures; they show how the model resolves "
         "the ambiguity the task deliberately leaves open."
