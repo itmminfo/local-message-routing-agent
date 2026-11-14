@@ -274,17 +274,24 @@
 
   function renderSuggestion() {
     const suggestion = current?.suggestion || { status: "not_requested" };
+    const pendingReview = current?.state === "pending_review";
     controls.suggestionDetail.hidden = true;
     controls.quotes.replaceChildren();
-    controls.suggest.textContent = modelBusy ? "Pobieranie propozycji..." : "Poproś o propozycję";
-    if (modelBusy || suggestion.status === "pending") {
+    controls.suggest.textContent = pendingReview && modelBusy ? "Pobieranie propozycji..." : "Poproś o propozycję";
+    if (!pendingReview && !(suggestion.status === "ready" && suggestion.recipient)) {
+      controls.suggestionStatus.textContent = "Ten podgląd nie oczekuje już na akceptację.";
+      return;
+    }
+    if (pendingReview && (modelBusy || suggestion.status === "pending")) {
       controls.suggestionStatus.textContent = "Trwa pobieranie propozycji. Możesz wybrać dział i zatwierdzić wiadomość ręcznie.";
       return;
     }
     if (suggestion.status === "ready" && suggestion.recipient) {
-      controls.suggestionStatus.textContent = suggestion.used_fallback
-        ? "Propozycja awaryjna. Sprawdź dział przed zatwierdzeniem."
-        : "To podpowiedź do sprawdzenia. Wybór działu należy do Ciebie.";
+      controls.suggestionStatus.textContent = !pendingReview
+        ? suggestion.used_fallback ? "Zapisana propozycja awaryjna." : "Zapisana propozycja AI."
+        : suggestion.used_fallback
+          ? "Propozycja awaryjna. Sprawdź dział przed zatwierdzeniem."
+          : "To podpowiedź do sprawdzenia. Wybór działu należy do Ciebie.";
       controls.suggestedRecipient.textContent = departmentLabel(suggestion.recipient);
       controls.reason.textContent = suggestion.reason || "Model nie podał uzasadnienia.";
       for (const quote of suggestion.issue_quotes || []) {
@@ -332,7 +339,7 @@
     if (current && current.id === next.id) {
       if (Number(next.version) < Number(current.version)) return;
       if (terminalStates.has(current.state) && next.state !== current.state) return;
-      if (current.state === "sending" && next.state === "pending_review") return;
+      if (current.state !== "pending_review" && next.state === "pending_review") return;
       if (next.version !== current.version) controls.confirmed.checked = false;
     }
     current = next;

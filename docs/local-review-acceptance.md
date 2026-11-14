@@ -126,3 +126,46 @@ Fingerprint ekstrakcji tej wersji: 5744c07e0e20. Historyczne raporty wcześniejs
 fingerprintu nie opisują bieżącej jakości. Gotowość dotyczy lokalnego przepływu
 z obowiązkową zgodą i Mailpit. Automatyczny wybór działu nadal nie jest odebrany.
 PR #4 pozostaje do osobnej decyzji. Przygotowanie PR #5 nie oznacza jego scalenia.
+
+## Review PR #4 względem main po scaleniu PR #5 i #6
+
+Zakres obejmuje całą zmianę od automatycznego routingu do lokalnego preview,
+sesje i zgodę, trwałe próby, formularz, diagnostykę i konfigurację Compose.
+Tytuł oraz opis PR wymagają tego samego zakresu; historyczna ewaluacja nie jest
+aktualną ścieżką wysyłki ani dowodem jakości obecnego modelu.
+
+Potwierdzony błąd P3: odrzucenie podglądu podczas pracy modelu zostawiało sugestię
+w stanie pending. Wygaśnięcie TTL miało analogiczny skutek. Formularz dodatkowo
+nadawał lokalnej oczekującej odpowiedzi pierwszeństwo przed zamkniętym stanem,
+więc mógł nadal pokazywać pobieranie lub zachęcać do akceptacji.
+
+Odrzucenie zamyka wyłącznie oczekującą sugestię; gotowa propozycja i wcześniejszy
+błąd pozostają bez zmian. Odczyt wygasłego podglądu pokazuje zakończone oczekiwanie
+bez mutacji z GET. Pasująca spóźniona odpowiedź po TTL zapisuje błąd zamiast wyniku
+i usuwa token. Nie może zmienić zgody ani wysłać wiadomości. Formularz pokazuje
+gotową propozycję jako historię i nie zachęca do akceptacji zamkniętego podglądu.
+Nie jest to anulowanie trwającego połączenia z modelem.
+
+Końcowy review odtworzył drugi błąd P3: starszy GET mógł cofnąć formularz z
+wygasłego albo innego zamkniętego stanu do pending_review. Backend odmawiał
+wysyłki po TTL, ale UI ponownie oferował akceptację. Guard tego samego podglądu
+odrzuca teraz regresję do pending_review. Wirtualne expired nadal może przejść
+do sending/sent, gdy zgoda weszła wcześniej; nie dodano go do nieodwracalnych
+stanów terminalnych ani nie osłabiono odzyskiwania nierozstrzygniętej zgody.
+
+Regresje backendu i rzeczywistego JavaScriptu miały RED przed poprawką, następnie
+GREEN. Obejmują odrzucenie, granicę TTL, spóźniony model, restart i zachowanie
+gotowych wyników. Dodatkowe próby granic HTTP/SMTP, SQL rollback, blokady procesu,
+osieroconej wysyłki i replay po wielokrotnych restartach nie ujawniły nowego
+materialnego obejścia zgody ani duplikatu. Próby z atrapą są oddzielone od
+rzeczywistego odbioru Mailpit. Brak gwarancji exactly-once i dowodu fizycznej
+obecności człowieka pozostaje jawnym ograniczeniem. Nadal wyłącznie lokalny Mailpit.
+
+Po poprawce przeszło 357 testów Python i 52 testy rzeczywistego JavaScriptu oraz
+Ruff, mypy, Bandit, pip-audit obu locków, build i walidacja Compose. W odizolowanym
+stosie rzeczywisty Mailpit odebrał zgodę bez dostępnego modelu. Po restarcie API
+replay nie dodał maila. Oddzielny przypadek błędu przed DATA przetrwał restart;
+16 równoległych retry utworzyło jednego następcę i jedną wiadomość. Replay tego
+retry po kolejnym restarcie nie wysłał kopii. Cała treść, Subject, To, Reply-To
+i stabilny Message-ID obu syntetycznych wiadomości były zgodne z zatwierdzeniem.
+Nie uruchamiano zewnętrznego SMTP ani nie zmieniano zamrożonych danych i etykiet.

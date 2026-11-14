@@ -484,3 +484,131 @@ for (const operation of ["approve", "retry"]) {
     assert.equal(reloaded.elements["recovery-panel"].hidden, false);
   });
 }
+
+
+for (const state of ["approved", "sending", "sent", "failed_before_submit", "delivery_unknown", "rejected", "expired"]) {
+  test(`${state} does not offer a fresh department choice or imply proposal work is still active`, async () => {
+    for (const status of ["not_requested", "pending", "error"]) {
+      const ui = await page(async () => record(state, { suggestion: { status } }), "preview-1");
+      assert.doesNotMatch(ui.elements["suggestion-status"].textContent,
+        /Trwa pobieranie|Możesz wybrać|Sprawdź dział|Wybór działu należy/);
+      assert.doesNotMatch(ui.elements["request-suggestion"].textContent, /Pobieranie/);
+      assert.equal(ui.elements["request-suggestion"].disabled, true);
+      assert.equal(ui.elements["approval-form"].hidden, true);
+      assert.equal(posts(ui).length, 0);
+    }
+  });
+}
+
+for (const state of ["rejected", "expired"]) {
+  test(`${state} stops showing active model work even while the old model request has not finished`, async () => {
+    let finish;
+    const waiting = new Promise(resolve => { finish = resolve; });
+    const ui = await page(async call => {
+      if (call.url.endsWith("/suggest")) return waiting;
+      if (call.url.endsWith("/reject") || call.method === "GET") {
+        return record(state, { suggestion: { status: "pending" } });
+      }
+      return record();
+    });
+    await create(ui);
+    const suggesting = ui.elements["request-suggestion"].emit("click");
+    assert.match(ui.elements["suggestion-status"].textContent, /Trwa pobieranie/);
+    await ui.elements[state === "rejected" ? "reject-preview" : "refresh-status"].emit("click");
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    assert.doesNotMatch(ui.elements["suggestion-status"].textContent, /Trwa pobieranie|Możesz wybrać/);
+    assert.doesNotMatch(ui.elements["request-suggestion"].textContent, /Pobieranie/);
+    assert.equal(ui.elements["request-suggestion"].disabled, true);
+    finish(record("pending_review", { suggestion: {
+      status: "ready", recipient: departments[0].recipient, reason: "Late suggestion", issue_quotes: ["Original"],
+    } }));
+    await suggesting;
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    assert.doesNotMatch(ui.elements["suggestion-status"].textContent, /Trwa pobieranie|Możesz wybrać/);
+    assert.equal(posts(ui).filter(call => call.url.endsWith("/approve")).length, 0);
+  });
+}
+
+test("closed previews retain a ready suggestion as literal read-only history", async () => {
+  for (const state of ["approved", "sending", "sent", "failed_before_submit", "delivery_unknown", "rejected", "expired"]) {
+    for (const used_fallback of [false, true]) {
+      const ui = await page(async () => record(state, { suggestion: {
+        status: "ready", recipient: departments[0].recipient, reason: "<b>Saved reason</b>",
+        issue_quotes: ["<b>Original</b>"], used_fallback,
+      } }), "preview-1");
+      assert.equal(ui.elements["suggestion-detail"].hidden, false);
+      assert.equal(ui.elements["suggestion-reason"].textContent, "<b>Saved reason</b>");
+      assert.equal(ui.elements["issue-quotes"].children[0].textContent, "<b>Original</b>");
+      assert.doesNotMatch(ui.elements["suggestion-status"].textContent,
+        /Trwa pobieranie|Możesz wybrać|Sprawdź dział|Wybór działu należy/);
+      assert.equal(ui.elements["request-suggestion"].disabled, true);
+      assert.equal(posts(ui).length, 0);
+    }
+  }
+});
+
+
+for (const state of ["rejected", "expired"]) {
+  test(`${state} with a saved ready proposal also overrides a still-waiting new request`, async () => {
+    let finish;
+    const waiting = new Promise(resolve => { finish = resolve; });
+    const ready = { status: "ready", recipient: departments[0].recipient, reason: "Saved suggestion", issue_quotes: ["Original"] };
+    const ui = await page(async call => {
+      if (call.url.endsWith("/suggest")) return waiting;
+      if (call.method === "GET") return record(state, { suggestion: ready });
+      return record("pending_review", { suggestion: ready });
+    });
+    await create(ui);
+    const suggesting = ui.elements["request-suggestion"].emit("click");
+    await ui.elements["refresh-status"].emit("click");
+    assert.doesNotMatch(ui.elements["suggestion-status"].textContent, /Trwa pobieranie|Możesz wybrać/);
+    assert.equal(ui.elements["suggestion-detail"].hidden, false);
+    assert.equal(ui.elements["suggestion-reason"].textContent, "Saved suggestion");
+    finish(record("pending_review", { suggestion: ready }));
+    await suggesting;
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    assert.equal(posts(ui).filter(call => call.url.endsWith("/approve")).length, 0);
+  });
+}
+
+
+for (const state of ["approved", "sending", "sent", "failed_before_submit", "delivery_unknown", "rejected", "expired"]) {
+  test(`an older concurrent pending GET cannot reopen ${state} for approval`, async () => {
+    const replies = [];
+    const ui = await page(async call => call.method === "GET"
+      ? new Promise(resolve => replies.push(resolve)) : record());
+    await create(ui); await confirm(ui);
+    const older = ui.elements["refresh-status"].emit("click");
+    const newer = ui.elements["refresh-status"].emit("click");
+    assert.equal(replies.length, 2);
+    replies[1](record(state, { suggestion: { status: "error" } }));
+    await newer;
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    replies[0](record("pending_review", { suggestion: { status: "pending" } }));
+    await older;
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    assert.equal(ui.elements["approval-form"].hidden, true);
+    assert.equal(ui.elements["approve-send"].disabled, true);
+    assert.doesNotMatch(ui.elements["suggestion-status"].textContent, /Trwa pobieranie|Możesz wybrać/);
+    await ui.elements["approval-form"].emit("submit");
+    assert.equal(posts(ui).filter(call => call.url.endsWith("/approve")).length, 0);
+  });
+}
+
+test("a virtual expiry with unresolved approval still resolves to a durable sending or sent attempt", async () => {
+  for (const state of ["sending", "sent"]) {
+    let reads = 0;
+    const intent = JSON.stringify({ preview_id: "preview-1", operation: "approve", expected_attempt_id: null });
+    const ui = await page(async () => ++reads === 1 ? record("expired") : record(state),
+      "preview-1", undefined, undefined, [[intentKey, intent]]);
+    assert.equal(ui.elements["recovery-panel"].hidden, false);
+    assert.equal(ui.storage.get(intentKey), intent);
+    assert.equal(ui.elements["create-preview"].disabled, true);
+    await ui.elements["resolve-status"].emit("click");
+    assert.equal(ui.elements["state-label"].dataset.state, state);
+    assert.equal(ui.elements["recovery-panel"].hidden, true);
+    assert.equal(ui.storage.has(intentKey), false);
+    assert.equal(ui.elements["new-message"].hidden, state === "sending");
+    assert.equal(posts(ui).length, 0);
+  }
+});

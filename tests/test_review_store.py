@@ -484,3 +484,124 @@ def test_rejection_racing_delivery_has_one_atomic_winner(store: ReviewStore, ret
             assert delivered is not None and delivered[1] is not None
             assert final.state == "sending"
             assert len(final.attempts) == int(retry) + 1
+
+
+def test_reject_closes_pending_suggestion_and_discards_late_result_after_restart(
+    store: ReviewStore,
+) -> None:
+    record = preview(store)
+    _, token = store.begin_suggestion(record.id, SESSION, record.version)
+    assert token is not None
+    rejected = store.reject(record.id, SESSION, record.version)
+    assert rejected.state == "rejected"
+    assert rejected.suggestion.status == "error"
+    assert rejected.suggestion.error
+    assert rejected.attempts == []
+    assert rejected.recipient is None
+    late = store.finish_suggestion(
+        record.id,
+        SESSION,
+        record.version,
+        token,
+        Suggestion(status="ready", recipient=RECIPIENT, issue_quotes=[record.message]),
+    )
+    assert late == rejected
+    store.close()
+    restored = ReviewStore(store.path)
+    restored.start()
+    try:
+        assert restored.get_preview(record.id, SESSION) == rejected
+    finally:
+        restored.close()
+
+
+def test_expiry_closes_pending_suggestion_and_discards_late_result(
+    store: ReviewStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.review.store.time.time", lambda: 1000.0)
+    record = preview(store)
+    _, token = store.begin_suggestion(record.id, SESSION, record.version)
+    assert token is not None
+    monkeypatch.setattr("app.review.store.time.time", lambda: 1060.0)
+    expired = store.get_preview(record.id, SESSION)
+    assert expired.state == "expired"
+    assert expired.suggestion.status == "error"
+    assert expired.suggestion.error
+    finished = store.finish_suggestion(
+        record.id,
+        SESSION,
+        record.version,
+        token,
+        Suggestion(status="ready", recipient=RECIPIENT, issue_quotes=[record.message]),
+    )
+    assert finished == expired
+    assert finished.attempts == []
+    assert finished.recipient is None
+    with sqlite3.connect(store.path) as db:
+        suggestion_json, stored_token = db.execute(
+            "SELECT suggestion_json,suggestion_token FROM previews WHERE id=?", (record.id,)
+        ).fetchone()
+    assert Suggestion.model_validate_json(suggestion_json) == finished.suggestion
+    assert stored_token is None
+    store.close()
+    restored = ReviewStore(store.path)
+    restored.start()
+    try:
+        assert restored.get_preview(record.id, SESSION) == expired
+    finally:
+        restored.close()
+
+
+@pytest.mark.parametrize("closure", ["reject", "expire"])
+@pytest.mark.parametrize("status", ["not_requested", "ready", "error"])
+def test_closing_preview_preserves_an_already_finished_or_unrequested_suggestion(
+    store: ReviewStore,
+    monkeypatch: pytest.MonkeyPatch,
+    closure: str,
+    status: str,
+) -> None:
+    monkeypatch.setattr("app.review.store.time.time", lambda: 1000.0)
+    record = preview(store)
+    if status != "not_requested":
+        _, token = store.begin_suggestion(record.id, SESSION, record.version)
+        assert token is not None
+        suggestion = (
+            Suggestion(status="ready", recipient=RECIPIENT, issue_quotes=[record.message])
+            if status == "ready"
+            else Suggestion(status="error", error="Original model error")
+        )
+        record = store.finish_suggestion(record.id, SESSION, record.version, token, suggestion)
+    if closure == "reject":
+        closed = store.reject(record.id, SESSION, record.version)
+        assert closed.state == "rejected"
+    else:
+        monkeypatch.setattr("app.review.store.time.time", lambda: 1060.0)
+        closed = store.get_preview(record.id, SESSION)
+        assert closed.state == "expired"
+    assert closed.suggestion == record.suggestion
+    assert closed.attempts == []
+
+
+def test_expired_suggestion_completion_still_requires_its_current_token(
+    store: ReviewStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.review.store.time.time", lambda: 1000.0)
+    record = preview(store)
+    _, old_token = store.begin_suggestion(record.id, SESSION, record.version)
+    assert old_token is not None
+    result = Suggestion(status="ready", recipient=RECIPIENT, issue_quotes=[record.message])
+    store.finish_suggestion(record.id, SESSION, record.version, old_token, result)
+    _, current_token = store.begin_suggestion(record.id, SESSION, record.version)
+    assert current_token is not None and current_token != old_token
+    monkeypatch.setattr("app.review.store.time.time", lambda: 1060.0)
+    store.finish_suggestion(record.id, SESSION, record.version, old_token, result)
+    with sqlite3.connect(store.path) as db:
+        suggestion_json, stored_token = db.execute(
+            "SELECT suggestion_json,suggestion_token FROM previews WHERE id=?", (record.id,)
+        ).fetchone()
+    assert stored_token == current_token
+    assert Suggestion.model_validate_json(suggestion_json).status == "pending"
+    closed = store.finish_suggestion(record.id, SESSION, record.version, current_token, result)
+    assert closed.state == "expired"
+    assert closed.suggestion.status == "error"
+    assert closed.suggestion.recipient is None

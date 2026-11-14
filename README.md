@@ -45,6 +45,10 @@ Dozwolone działy: `human-resources@example.com`, `kadry@example.com`,
 `Reply-To` pochodzi wyłącznie ze zwalidowanego oryginalnego adresu nadawcy.
 Model i żądanie approve nie mogą zmienić treści ani nagłówków wysyłanej wiadomości.
 
+Odrzucenie lub wygaśnięcie podglądu zamyka oczekiwanie na propozycję. Spóźniona
+odpowiedź modelu nie przywraca akceptacji. Gotowa propozycja zostaje do odczytu;
+zamknięty podgląd nie zachęca do ponownego wyboru działu.
+
 ## Trwałość i niepewna wysyłka
 
 Wolumen `review-data` przechowuje SQLite w `/data/review.sqlite3`, również sesje,

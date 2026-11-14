@@ -126,8 +126,8 @@ services:
       API_BASE_URL: http://api:8000
       MAIL_API_URL: http://mailpit:8025
       REVIEW_ORIGIN: ${REVIEW_ORIGIN:-http://127.0.0.1:8000}
-      # Mirror api SMTP settings so the adversarial evaluator refuses a
-      # 40-message run if .env points api at anything other than Mailpit.
+      # Keep proposal diagnostics restricted to the local Mailpit configuration.
+      # The evaluator rejects its previews; it never approves or sends mail.
       EVAL_SMTP_HOST: ${SMTP_HOST:-mailpit}
       EVAL_SMTP_PORT: ${SMTP_PORT:-1025}
     entrypoint: ["python"]

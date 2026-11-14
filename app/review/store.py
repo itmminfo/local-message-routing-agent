@@ -251,6 +251,11 @@ class ReviewStore:
         state = row["state"]
         if state in {"pending_review", "failed_before_submit"} and time.time() >= row["expires_at"]:
             state = "expired"
+        suggestion = Suggestion.model_validate_json(row["suggestion_json"])
+        if state == "expired" and suggestion.status == "pending":
+            suggestion = Suggestion(
+                status="error", error="Podgląd wygasł przed zakończeniem sugestii."
+            )
         return PreviewRecord.model_validate(
             {
                 "id": row["id"],
@@ -262,7 +267,7 @@ class ReviewStore:
                 "created_at": timestamp(row["created_at"]),
                 "expires_at": timestamp(row["expires_at"]),
                 "recipient": row["recipient"],
-                "suggestion": json.loads(row["suggestion_json"]),
+                "suggestion": suggestion,
                 "message_id": row["message_id"],
                 "attempts": attempts,
                 "retry_allowed": state == "failed_before_submit",
@@ -329,16 +334,20 @@ class ReviewStore:
     ) -> PreviewRecord:
         with self._transaction() as db:
             db.execute(
-                "UPDATE previews SET suggestion_json=?,suggestion_token=NULL "
+                "UPDATE previews SET suggestion_json=CASE WHEN expires_at>? "
+                "THEN ? ELSE ? END,suggestion_token=NULL "
                 "WHERE id=? AND session_key=? AND version=? AND state='pendin"
-                "g_review' AND suggestion_token=? AND expires_at>?",
+                "g_review' AND suggestion_token=?",
                 (
+                    time.time(),
                     suggestion.model_dump_json(),
+                    Suggestion(
+                        status="error", error="Podgląd wygasł przed zakończeniem sugestii."
+                    ).model_dump_json(),
                     preview_id,
                     session_key,
                     version,
                     token,
-                    time.time(),
                 ),
             )
             return self._record(db, self._row(db, preview_id, session_key))
@@ -505,9 +514,15 @@ class ReviewStore:
             # with either delivery transition. Keep approval and attempt history.
             if row["state"] not in {"pending_review", "failed_before_submit"}:
                 raise ReviewConflict("Nie można odrzucić rozpoczętej lub zamkniętej operacji.")
+            suggestion = Suggestion.model_validate_json(row["suggestion_json"])
+            if suggestion.status == "pending":
+                suggestion = Suggestion(
+                    status="error", error="Podgląd odrzucono przed zakończeniem sugestii."
+                )
             db.execute(
-                "UPDATE previews SET state='rejected',suggestion_token=NULL WHERE id=?",
-                (preview_id,),
+                "UPDATE previews SET state='rejected',suggestion_token=NULL,suggestion_json=? "
+                "WHERE id=?",
+                (suggestion.model_dump_json(), preview_id),
             )
             self._event(db, preview_id, "rejected", {})
             return self._record(db, self._row(db, preview_id, session_key))
