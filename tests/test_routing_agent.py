@@ -7,6 +7,7 @@ from app.agent.prompts import build_routing_messages, routing_prompt_fingerprint
 from app.agent.routing_agent import RoutingAgent
 from app.agent.tool_schema import build_send_email_tool_schema
 from app.domain.departments import ALLOWED_RECIPIENTS
+from app.infrastructure.ollama_client import OllamaChatError
 
 
 def tool_response(
@@ -63,31 +64,11 @@ class FakeOllamaClient:
         return self.responses[index]
 
 
-class FakeMailSender:
-    def __init__(self) -> None:
-        self.sent: list[dict[str, Any]] = []
-
-    def send_email(self, to: str, reply_to: str, subject: str, body: str) -> None:
-        self.sent.append(
-            {
-                "to": to,
-                "reply_to": reply_to,
-                "subject": subject,
-                "body": body,
-            }
-        )
-
-
 def make_agent(
     responses: list[dict[str, Any]],
-) -> tuple[RoutingAgent, FakeOllamaClient, FakeMailSender]:
+) -> tuple[RoutingAgent, FakeOllamaClient]:
     ollama_client = FakeOllamaClient(responses)
-    mail_sender = FakeMailSender()
-    agent = RoutingAgent(
-        ollama_client=ollama_client,
-        mail_sender=mail_sender,
-    )
-    return agent, ollama_client, mail_sender
+    return RoutingAgent(ollama_client=ollama_client), ollama_client
 
 
 def test_routing_prompt_fingerprint_is_12_hex_of_the_system_prompt() -> None:
@@ -126,10 +107,10 @@ def test_routing_prompt_fingerprint_changes_when_prompt_changes(
 def test_routing_started_log_includes_prompt_fingerprint(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent, _ollama_client, _mail_sender = make_agent([tool_response()])
+    agent, _ollama_client = make_agent([tool_response()])
 
     with caplog.at_level(logging.INFO, logger="app.agent.routing_agent"):
-        agent.route(
+        agent.propose(
             sender_email="jan.nowak@example.com",
             message="Nie działa komputer",
         )
@@ -260,35 +241,25 @@ def test_build_routing_messages_does_not_expose_sender_email_to_the_model() -> N
     assert all(sender not in message["content"] for message in messages)
 
 
-def test_valid_tool_call_sends_to_selected_recipient() -> None:
-    agent, ollama_client, mail_sender = make_agent([tool_response()])
+def test_valid_tool_call_proposes_selected_recipient() -> None:
+    agent, ollama_client = make_agent([tool_response()])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie działa mi komputer",
     )
 
     assert len(ollama_client.calls) == 1
-    assert mail_sender.sent[0]["to"] == "help-desk@example.com"
-    assert mail_sender.sent[0]["reply_to"] == "jan.nowak@example.com"
-    assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: help-desk@example.com"
-    body = mail_sender.sent[0]["body"]
-    assert "Dział docelowy: help-desk@example.com" in body
-    assert "Treść zgłoszenia:" in body
-    assert "Nie działa mi komputer" in body
-    assert "Uzasadnienie (AI): The message concerns a computer issue." in body
-    assert result.status == "sent"
     assert result.recipient == "help-desk@example.com"
-    assert result.reply_to == "jan.nowak@example.com"
     assert result.used_fallback is False
     assert result.model == "qwen2.5:3b"
     assert result.routing_confidence == "high"
 
 
 def test_no_tool_call_triggers_retry() -> None:
-    agent, ollama_client, _mail_sender = make_agent([no_tool_response(), tool_response()])
+    agent, ollama_client = make_agent([no_tool_response(), tool_response()])
 
-    agent.route(
+    agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie działa mi komputer",
     )
@@ -302,178 +273,113 @@ def test_no_tool_call_triggers_retry() -> None:
 
 
 def test_retry_success_works() -> None:
-    agent, _ollama_client, mail_sender = make_agent([no_tool_response(), tool_response()])
+    agent, _ollama_client = make_agent([no_tool_response(), tool_response()])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie działa mi komputer",
     )
 
-    assert mail_sender.sent[0]["to"] == "help-desk@example.com"
     assert result.recipient == "help-desk@example.com"
     assert result.used_fallback is False
 
 
-def test_no_tool_call_after_retry_triggers_fallback() -> None:
-    agent, ollama_client, mail_sender = make_agent([no_tool_response(), no_tool_response()])
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert mail_sender.sent[0]["reply_to"] == "jan.nowak@example.com"
-    assert result.status == "sent"
-    assert result.recipient == "other@example.com"
-    assert result.used_fallback is True
-    assert result.routing_confidence == "low"
+def test_no_tool_call_after_retry_refuses_proposal() -> None:
+    agent, client = make_agent([no_tool_response(), no_tool_response()])
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
 def test_model_choosing_other_directly_is_low_confidence_without_fallback() -> None:
     # The model can pick OTHER itself (no parse fallback): a successful route with
     # used_fallback False, but low confidence, since OTHER means "no specific fit".
-    agent, _ollama_client, mail_sender = make_agent([tool_response(recipient="other@example.com")])
+    agent, _ollama_client = make_agent([tool_response(recipient="other@example.com")])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Coś, co nie pasuje do żadnego działu.",
     )
 
-    assert mail_sender.sent[0]["to"] == "other@example.com"
     assert result.recipient == "other@example.com"
     assert result.used_fallback is False
     assert result.routing_confidence == "low"
 
 
-def test_low_confidence_route_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    # The low-confidence ops signal must be logged (mirrors the "reason defaulted"
-    # log coverage); a fallback routes to OTHER and is low confidence.
-    agent, _ollama_client, _mail_sender = make_agent([no_tool_response(), no_tool_response()])
-
-    with caplog.at_level(logging.INFO, logger="app.agent.routing_agent"):
-        result = agent.route(
-            sender_email="jan.nowak@example.com",
-            message="Cos, co nie pasuje do zadnego dzialu.",
-        )
-
-    assert result.routing_confidence == "low"
-    assert "Routing low confidence recipient=other@example.com" in caplog.text
-    assert "used_fallback=True" in caplog.text
+def test_no_tool_call_refusal_does_not_create_other_proposal() -> None:
+    agent, client = make_agent([no_tool_response(), no_tool_response()])
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
-def test_non_dict_message_falls_back_without_crashing() -> None:
-    # Ollama normally returns {"message": {...}}. An unexpected shape (null/str/
-    # list) must fall back gracefully, not raise AttributeError -> HTTP 500.
-    agent, ollama_client, mail_sender = make_agent([{"message": None}, {"message": "unexpected"}])
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert result.recipient == "other@example.com"
-    assert result.used_fallback is True
+def test_non_dict_message_refuses_proposal() -> None:
+    agent, client = make_agent([{"message": None}, {"message": "unexpected"}])
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
-def test_invalid_recipient_triggers_retry_then_fallback_if_retry_fails() -> None:
-    agent, ollama_client, mail_sender = make_agent(
+def test_invalid_recipient_refuses_proposal_after_retry() -> None:
+    agent, client = make_agent(
         [
             tool_response(recipient="attacker@example.com"),
             tool_response(recipient="attacker@example.com"),
         ]
     )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert result.recipient == "other@example.com"
-    assert result.reason == "Model wskazał odbiorcę spoza listy: attacker@example.com."
-    assert result.used_fallback is True
-    # The fallback reason is written by the backend, so the body must not attribute it
-    # to the model.
-    body = mail_sender.sent[0]["body"]
-    assert (
-        "Przekierowanie awaryjne: Model wskazał odbiorcę spoza listy: attacker@example.com." in body
-    )
-    assert "Uzasadnienie (AI)" not in body
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
 def test_malformed_tool_args_trigger_retry_then_fallback_if_retry_fails() -> None:
-    agent, ollama_client, mail_sender = make_agent(
-        [
-            tool_response(arguments="{not valid json"),
-            tool_response(arguments="{not valid json"),
-        ]
+    agent, client = make_agent(
+        [tool_response(arguments="{bad JSON"), tool_response(arguments="{bad JSON")]
     )
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
+
+def test_model_headers_are_not_retained_in_proposal() -> None:
+    agent, _client = make_agent(
+        [tool_response(extra={"subject": "x\r\nBcc: attacker@example.com"})]
     )
-
-    assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert result.recipient == "other@example.com"
-    assert result.reason == "Model zwrócił niepoprawne argumenty send_email."
-    assert result.used_fallback is True
-
-
-def test_model_subject_is_ignored_for_deterministic_subject() -> None:
-    agent, _ollama_client, mail_sender = make_agent(
-        [tool_response(extra={"subject": "Cokolwiek od modelu\r\nBcc: attacker@example.com"})]
-    )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    # The subject is built by the app, not taken from the model, so any
-    # model-supplied subject (including a CRLF-injection attempt) is never used.
-    expected = "Zgłoszenie skierowane do: help-desk@example.com"
-    assert mail_sender.sent[0]["subject"] == expected
-    assert result.subject == expected
-    assert "\r" not in mail_sender.sent[0]["subject"]
-    assert "Bcc" not in mail_sender.sent[0]["subject"]
+    result = agent.propose("jan.nowak@example.com", "Nie działa mi komputer")
+    assert set(vars(result)) == {
+        "recipient",
+        "reason",
+        "model",
+        "routing_confidence",
+        "used_fallback",
+        "issue_quotes",
+    }
+    assert result.recipient == "help-desk@example.com"
 
 
-def test_blank_optional_args_are_filled_with_defaults_and_send() -> None:
-    agent, ollama_client, mail_sender = make_agent([tool_response(reason="")])
+def test_blank_reason_uses_default_in_proposal() -> None:
+    agent, ollama_client = make_agent([tool_response(reason="")])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie działa mi komputer",
     )
 
     assert len(ollama_client.calls) == 1
-    assert mail_sender.sent[0]["to"] == "help-desk@example.com"
-    assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: help-desk@example.com"
     assert result.recipient == "help-desk@example.com"
     assert result.reason == "Model nie podał uzasadnienia."
     assert result.used_fallback is False
 
 
-def test_recipient_only_tool_call_fills_defaults_and_sends() -> None:
-    agent, ollama_client, mail_sender = make_agent(
-        [tool_response(arguments={"recipient": "it@example.com"})]
-    )
+def test_recipient_only_tool_call_fills_proposal_reason() -> None:
+    agent, ollama_client = make_agent([tool_response(arguments={"recipient": "it@example.com"})])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Aplikacja zwraca błąd",
     )
 
     assert len(ollama_client.calls) == 1
-    assert mail_sender.sent[0]["to"] == "it@example.com"
-    assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: it@example.com"
     assert result.reason == "Model nie podał uzasadnienia."
     assert result.recipient == "it@example.com"
     assert result.used_fallback is False
@@ -482,12 +388,10 @@ def test_recipient_only_tool_call_fills_defaults_and_sends() -> None:
 def test_defaulted_reason_is_logged_for_observability(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent, ollama_client, mail_sender = make_agent(
-        [tool_response(arguments={"recipient": "it@example.com"})]
-    )
+    agent, ollama_client = make_agent([tool_response(arguments={"recipient": "it@example.com"})])
 
     with caplog.at_level(logging.INFO, logger="app.agent.routing_agent"):
-        result = agent.route(
+        result = agent.propose(
             sender_email="jan.nowak@example.com",
             message="Aplikacja zwraca błąd",
         )
@@ -502,12 +406,10 @@ def test_defaulted_reason_is_logged_for_observability(
 def test_provided_reason_is_not_logged_as_defaulted(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent, ollama_client, mail_sender = make_agent(
-        [tool_response(reason="Zgłoszenie dotyczy błędu aplikacji.")]
-    )
+    agent, ollama_client = make_agent([tool_response(reason="Zgłoszenie dotyczy błędu aplikacji.")])
 
     with caplog.at_level(logging.INFO, logger="app.agent.routing_agent"):
-        result = agent.route(
+        result = agent.propose(
             sender_email="jan.nowak@example.com",
             message="Aplikacja zwraca błąd",
         )
@@ -519,12 +421,12 @@ def test_provided_reason_is_not_logged_as_defaulted(
 def test_defaulted_reason_after_retry_is_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent, ollama_client, mail_sender = make_agent(
+    agent, ollama_client = make_agent(
         [no_tool_response(), tool_response(arguments={"recipient": "it@example.com"})]
     )
 
     with caplog.at_level(logging.INFO, logger="app.agent.routing_agent"):
-        agent.route(
+        agent.propose(
             sender_email="jan.nowak@example.com",
             message="Aplikacja zwraca błąd",
         )
@@ -534,83 +436,45 @@ def test_defaulted_reason_after_retry_is_logged(
     assert "after_retry=True" in caplog.text
 
 
-def test_blank_recipient_triggers_retry_then_fallback_if_retry_fails() -> None:
-    agent, ollama_client, mail_sender = make_agent(
-        [
-            tool_response(recipient="   "),
-            tool_response(recipient=""),
-        ]
-    )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert result.recipient == "other@example.com"
-    assert result.reason == "Model nie wskazał odbiorcy."
-    assert result.used_fallback is True
+def test_blank_recipient_refuses_proposal_after_retry() -> None:
+    agent, client = make_agent([tool_response(recipient="   "), tool_response(recipient="")])
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
 def test_retry_success_after_invalid_first_attempt_works() -> None:
-    agent, ollama_client, mail_sender = make_agent(
+    agent, ollama_client = make_agent(
         [
             tool_response(recipient="attacker@example.com"),
             tool_response(recipient="it@example.com"),
         ]
     )
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie mogę zalogować się do platformy szkoleniowej",
     )
 
     assert len(ollama_client.calls) == 2
-    assert mail_sender.sent[0]["to"] == "it@example.com"
-    assert mail_sender.sent[0]["reply_to"] == "jan.nowak@example.com"
     assert result.recipient == "it@example.com"
     assert result.used_fallback is False
 
 
-def test_reply_to_is_always_sender_email() -> None:
-    agent, _ollama_client, mail_sender = make_agent(
-        [
-            tool_response(
-                arguments={
-                    "recipient": "help-desk@example.com",
-                    "subject": "Message routed to help-desk",
-                    "body": "Please help with this workstation issue.",
-                    "reason": "The message concerns a computer issue.",
-                    "reply_to": "attacker@example.com",
-                }
-            )
-        ]
-    )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert mail_sender.sent[0]["reply_to"] == "jan.nowak@example.com"
-    assert result.reply_to == "jan.nowak@example.com"
+def test_model_reply_to_is_not_retained_in_proposal() -> None:
+    agent, _client = make_agent([tool_response(extra={"reply_to": "attacker@example.com"})])
+    result = agent.propose("jan.nowak@example.com", "Nie działa mi komputer")
+    assert "attacker@example.com" not in str(vars(result))
+    assert result.recipient == "help-desk@example.com"
 
 
-def test_wrong_tool_name_is_ignored_and_falls_back() -> None:
-    agent, _ollama_client, mail_sender = make_agent(
+def test_wrong_tool_name_refuses_proposal_after_retry() -> None:
+    agent, client = make_agent(
         [tool_response(name="send_message"), tool_response(name="send_message")]
     )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Nie działa mi komputer",
-    )
-
-    assert mail_sender.sent[0]["to"] == "other@example.com"
-    assert result.recipient == "other@example.com"
-    assert result.used_fallback is True
+    with pytest.raises(OllamaChatError):
+        agent.propose(sender_email="jan.nowak@example.com", message="Nie działa komputer")
+    assert len(client.calls) == 2
 
 
 def test_multiple_tool_calls_use_first_valid_send_email_call() -> None:
@@ -654,24 +518,19 @@ def test_multiple_tool_calls_use_first_valid_send_email_call() -> None:
             ]
         }
     }
-    agent, _ollama_client, mail_sender = make_agent([response])
+    agent, _ollama_client = make_agent([response])
 
-    result = agent.route(
+    result = agent.propose(
         sender_email="jan.nowak@example.com",
         message="Nie działa aplikacja",
     )
 
-    assert mail_sender.sent[0]["to"] == "it@example.com"
-    assert mail_sender.sent[0]["subject"] == "Zgłoszenie skierowane do: it@example.com"
     assert result.recipient == "it@example.com"
     assert result.used_fallback is False
 
 
-def test_extra_tool_arguments_are_ignored_and_do_not_affect_email() -> None:
-    # A small model may add fields beyond the recipient+reason contract (the schema
-    # declares additionalProperties:false, but that is only a hint to the model). The
-    # backend must ignore them: the routing decision stands and the email is unaffected.
-    agent, _ollama_client, mail_sender = make_agent(
+def test_extra_tool_arguments_do_not_change_proposal() -> None:
+    agent, _client = make_agent(
         [
             tool_response(
                 recipient="it@example.com",
@@ -679,34 +538,23 @@ def test_extra_tool_arguments_are_ignored_and_do_not_affect_email() -> None:
                 extra={
                     "to": "attacker@evil.com",
                     "reply_to": "attacker@evil.com",
-                    "subject": "HIJACKED\r\nBcc: leak@evil.com",
-                    "body": "attacker-controlled body",
+                    "subject": "HIJACKED",
+                    "body": "SECRET-LEAK-PAYLOAD",
                 },
             )
         ]
     )
-
-    result = agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Aplikacja zwraca błąd",
-    )
-
-    sent = mail_sender.sent[0]
-    assert sent["to"] == "it@example.com"
-    assert sent["reply_to"] == "jan.nowak@example.com"
-    assert sent["subject"] == "Zgłoszenie skierowane do: it@example.com"
+    result = agent.propose("jan.nowak@example.com", "Aplikacja zwraca błąd")
     assert result.recipient == "it@example.com"
-    assert result.used_fallback is False
+    assert result.reason == "Problem z aplikacją."
+    assert result.issue_quotes == ["Aplikacja zwraca błąd"]
 
 
-def test_extra_tool_argument_values_never_reach_the_email() -> None:
-    # Not just ignored for routing: the untrusted values of the extra fields must not
-    # leak into the subject, body, or any header of the sent message.
-    agent, _ollama_client, mail_sender = make_agent(
+def test_extra_tool_argument_values_never_reach_proposal() -> None:
+    agent, _client = make_agent(
         [
             tool_response(
                 recipient="it@example.com",
-                reason="Problem z aplikacją.",
                 extra={
                     "to": "attacker@evil.com",
                     "subject": "HIJACKED",
@@ -715,17 +563,9 @@ def test_extra_tool_argument_values_never_reach_the_email() -> None:
             )
         ]
     )
-
-    agent.route(
-        sender_email="jan.nowak@example.com",
-        message="Aplikacja zwraca błąd",
-    )
-
-    sent = mail_sender.sent[0]
-    for field in ("to", "reply_to", "subject", "body"):
-        assert "attacker@evil.com" not in sent[field]
-        assert "HIJACKED" not in sent[field]
-        assert "SECRET-LEAK-PAYLOAD" not in sent[field]
+    result = agent.propose("jan.nowak@example.com", "Aplikacja zwraca błąd")
+    for value in ("attacker@evil.com", "HIJACKED", "SECRET-LEAK-PAYLOAD"):
+        assert value not in str(vars(result))
 
 
 def test_extra_tool_arguments_log_count_without_names_or_values(
@@ -733,7 +573,7 @@ def test_extra_tool_arguments_log_count_without_names_or_values(
 ) -> None:
     # The model may copy message content into a JSON key, so even an extra field
     # name is untrusted data and must not reach logs.
-    agent, _ollama_client, _mail_sender = make_agent(
+    agent, _ollama_client = make_agent(
         [
             tool_response(
                 recipient="it@example.com",
@@ -744,7 +584,7 @@ def test_extra_tool_arguments_log_count_without_names_or_values(
     )
 
     with caplog.at_level(logging.WARNING, logger="app.agent.routing_agent"):
-        agent.route(
+        agent.propose(
             sender_email="jan.nowak@example.com",
             message="Aplikacja zwraca błąd",
         )
@@ -760,10 +600,10 @@ def test_contract_compliant_tool_call_logs_no_unsupported_arguments(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     # The happy path (only recipient+reason) must not emit the contract-violation log.
-    agent, _ollama_client, _mail_sender = make_agent([tool_response()])
+    agent, _ollama_client = make_agent([tool_response()])
 
     with caplog.at_level(logging.WARNING, logger="app.agent.routing_agent"):
-        agent.route(
+        agent.propose(
             sender_email="jan.nowak@example.com",
             message="Nie działa mi komputer",
         )

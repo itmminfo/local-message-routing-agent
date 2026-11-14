@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="review-api-prefix" content="__API_PREFIX__">
+  <meta name="color-scheme" content="light">
+  <title>Podgląd zgłoszenia</title>
+  <link rel="stylesheet" href="/assets/review.css">
+  <script src="/assets/review.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#composer-title">Przejdź do formularza</a>
+  <div class="desk">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Korespondencja / stanowisko lokalne</p>
+        <h1>Podgląd zgłoszenia</h1>
+        <p class="intro">Sprawdź oryginał i wybierz dział. Wysyłka wymaga Twojej akceptacji.</p>
+      </div>
+      <p class="local-mark"><span class="local-dot" aria-hidden="true"></span>Tylko Mailpit</p>
+    </header>
+
+    <p id="connection-status" class="connection-status" role="status" aria-live="polite">Przygotowywanie lokalnej sesji...</p>
+    <div id="notice" class="notice" role="alert" hidden></div>
+
+    <main class="workspace">
+      <section class="panel composer" aria-labelledby="composer-title">
+        <div class="section-heading">
+          <span class="step-number" aria-hidden="true">01</span>
+          <h2 id="composer-title">Napisz zgłoszenie</h2>
+        </div>
+        <form id="compose-form" method="post">
+          <label for="sender-email">Twój adres e-mail</label>
+          <input id="sender-email" name="email" type="email" autocomplete="email" required maxlength="254" aria-describedby="email-help" disabled>
+          <p id="email-help" class="field-help">Ten adres będzie użyty w polu odpowiedzi.</p>
+
+          <div class="label-row">
+            <label for="message">Treść zgłoszenia</label>
+            <span id="character-count" class="character-count">0 / 5000</span>
+          </div>
+          <textarea id="message" name="message" rows="12" maxlength="5000" required aria-describedby="message-help character-count" disabled></textarea>
+          <p id="message-help" class="field-help">Utworzenie podglądu nie wysyła wiadomości.</p>
+          <button id="create-preview" class="button primary" type="submit" disabled>Utwórz podgląd</button>
+          <button id="new-message" class="button text-button" type="button" hidden>Nowe zgłoszenie</button>
+        </form>
+      </section>
+
+      <section class="panel review" aria-labelledby="review-title">
+        <div class="section-heading">
+          <span class="step-number" aria-hidden="true">02</span>
+          <h2 id="review-title" tabindex="-1">Sprawdź i zatwierdź</h2>
+          <span id="state-label" class="state-label" role="status" aria-live="polite" aria-atomic="true">Brak podglądu</span>
+        </div>
+
+        <section id="recovery-panel" class="delivery-result" data-state="unresolved" hidden aria-labelledby="recovery-title">
+          <h3 id="recovery-title">Nie można potwierdzić stanu operacji</h3>
+          <p id="recovery-description" role="status" aria-live="polite"></p>
+          <p class="operation-reference">Identyfikator: <code id="recovery-id"></code></p>
+          <button id="resolve-status" class="button secondary" type="button">Sprawdź ponownie stan</button>
+          <button id="withdraw-preview" class="button secondary" type="button" hidden>Wycofaj podgląd</button>
+          <label id="context-loss-confirmation" class="confirmation" hidden>
+            <input id="accept-context-loss" type="checkbox">
+            <span>Rozumiem, że poprzednia wiadomość mogła zostać wysłana. Sprawdziłem Mailpit. Nowe zgłoszenie może utworzyć kopię.</span>
+          </label>
+          <button id="abandon-context" class="button secondary" type="button" hidden disabled>Otwórz nowy formularz mimo braku wyniku</button>
+        </section>
+
+        <aside id="previous-operation" class="notice" data-kind="info" hidden>
+          <p>Poprzednia operacja bez odczytanego wyniku: <code id="previous-operation-id"></code>.</p>
+          <p>Otwarcie nowego formularza nie potwierdza braku wcześniejszej wysyłki. Sprawdź Mailpit przed wysłaniem tej samej treści.</p>
+        </aside>
+
+        <div id="empty-preview" class="empty-preview">
+          <div class="document-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p>Tutaj pojawi się zapisany oryginał.</p>
+          <p class="muted">Propozycja AI jest opcjonalna. Dział możesz wybrać samodzielnie.</p>
+        </div>
+
+        <div id="preview-content" hidden>
+          <div class="original">
+            <div class="original-heading"><h3>Zapisany oryginał</h3><span id="preview-time" class="muted"></span></div>
+            <p class="sender-line"><span>Nadawca</span><strong id="original-email"></strong></p>
+            <p id="original-message" class="original-message" tabindex="0" aria-label="Zapisana treść zgłoszenia"></p>
+          </div>
+
+          <section class="suggestion" aria-labelledby="suggestion-title">
+            <div class="suggestion-heading">
+              <h3 id="suggestion-title">Propozycja AI</h3>
+              <button id="request-suggestion" class="button secondary compact" type="button">Poproś o propozycję</button>
+            </div>
+            <p id="suggestion-status" class="muted" role="status" aria-live="polite">Nie pobrano propozycji. Możesz wybrać dział ręcznie.</p>
+            <div id="suggestion-detail" hidden>
+              <p id="suggested-recipient" class="suggested-recipient"></p>
+              <p id="suggestion-reason"></p>
+              <details id="quote-details">
+                <summary>Fragmenty użyte w propozycji</summary>
+                <ul id="issue-quotes" class="issue-quotes"></ul>
+              </details>
+            </div>
+          </section>
+
+          <form id="approval-form" class="approval" method="post">
+            <label for="department">Dział, do którego chcesz wysłać zgłoszenie</label>
+            <select id="department" name="recipient" required>
+              <option value="">Wybierz dział</option>
+            </select>
+            <label id="confirmation-label" class="confirmation" for="confirmed">
+              <input id="confirmed" name="confirmed" type="checkbox" required>
+              <span>Sprawdziłem treść i wybrany dział. Zatwierdzam wysłanie tej wiadomości.</span>
+            </label>
+            <button id="approve-send" class="button primary" type="submit" disabled>Zatwierdź i wyślij</button>
+            <button id="reject-preview" class="button text-button" type="button">Odrzuć podgląd</button>
+          </form>
+
+          <section id="delivery-result" class="delivery-result" aria-labelledby="delivery-title" hidden>
+            <h3 id="delivery-title"></h3>
+            <p id="delivery-description"></p>
+            <dl id="delivery-identifiers" class="delivery-identifiers" hidden>
+              <dt>Message-ID</dt><dd id="delivery-message-id"></dd>
+              <dt>Liczba prób</dt><dd id="delivery-attempts"></dd>
+            </dl>
+            <button id="retry-send" class="button primary" type="button" hidden>Ponów zatwierdzoną wysyłkę</button>
+          </section>
+
+          <div class="review-footer">
+            <p id="expiry-label" class="muted"></p>
+            <button id="refresh-status" class="button text-button compact" type="button">Odśwież stan</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="page-footer"><p>Treść i adresat są zapisywane przed wysyłką. Żadna propozycja AI nie zatwierdza wiadomości.</p></footer>
+  </div>
+  <noscript><p class="noscript">Do obsługi podglądu potrzebny jest JavaScript. Wiadomość nie została wysłana.</p></noscript>
+</body>
+</html>

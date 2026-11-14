@@ -1,5 +1,10 @@
 # Wyniki ewaluacji routingu
 
+Od wariantu local-review z 14.11.2026 skrypty diagnostyczne tworzą podgląd,
+pobierają propozycję i odrzucają podgląd. Nie zatwierdzają i nie wysyłają SMTP.
+Poniższe wyniki to pomiary historyczne wcześniejszych wersji, nie dowód jakości
+aktualnego modelu ani odbiór ręcznej akceptacji.
+
 Ten dokument zawiera realny, datowany przebieg `scripts/routing_accuracy_check.py`
 wraz ze środowiskiem i wersją/digestem modelu. To **diagnostyka jakości**, a nie
 bramka CI (uzasadnienie w sekcji "Ograniczenia").

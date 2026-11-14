@@ -1,27 +1,17 @@
 import asyncio
-import smtplib
-from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 import pytest
 from app.api.routes import (
     get_mail_sender,
-    get_message_routing_service,
     get_ollama_client,
 )
 from app.config import get_settings
 from app.infrastructure.ollama_client import (
-    OllamaChatError,
     OllamaReadiness,
-    OllamaUnavailableError,
 )
 from app.main import app, create_app
-from app.schemas.messages import (
-    MESSAGE_MAX_LENGTH,
-    MessageRouteRequest,
-    MessageRouteResponse,
-)
 from fastapi import FastAPI
 
 
@@ -35,9 +25,10 @@ def request_app(
         transport = httpx.ASGITransport(app=target_app)
         async with httpx.AsyncClient(
             transport=transport,
-            base_url="http://testserver",
+            base_url="http://localhost",
         ) as client:
-            return await client.request(method, url, **kwargs)
+            headers = {"Origin": "http://localhost", **kwargs.pop("headers", {})}
+            return await client.request(method, url, headers=headers, **kwargs)
 
     return asyncio.run(call_app())
 
@@ -46,79 +37,11 @@ def request(method: str, url: str, **kwargs: object) -> httpx.Response:
     return request_app(app, method, url, **kwargs)
 
 
-class FakeMessageRoutingService:
-    def __init__(self, response: MessageRouteResponse | None = None) -> None:
-        self.requests: list[MessageRouteRequest] = []
-        self.response = response or MessageRouteResponse(
-            status="sent",
-            recipient="help-desk@example.com",
-            reply_to="sender@example.com",
-            subject="Zgłoszenie skierowane do: help-desk@example.com",
-            reason="The message concerns a computer issue.",
-            used_fallback=False,
-            model="qwen2.5:3b",
-            routing_confidence="high",
-        )
-
-    def route_message(self, route_request: MessageRouteRequest) -> MessageRouteResponse:
-        self.requests.append(route_request)
-        return self.response
-
-
-class RaisingMessageRoutingService:
-    def __init__(self, exc: Exception) -> None:
-        self.exc = exc
-
-    def route_message(self, route_request: object) -> MessageRouteResponse:
-        raise self.exc
-
-
-def request_with_service(
-    service: object,
-    method: str,
-    url: str,
-    target_app: FastAPI = app,
-    **kwargs: object,
-) -> httpx.Response:
-    target_app.dependency_overrides[get_message_routing_service] = lambda: service
-    try:
-        return request_app(target_app, method, url, **kwargs)
-    finally:
-        target_app.dependency_overrides.clear()
-
-
 def test_api_app_imports() -> None:
     assert app.title == "Local Message Routing Agent"
     assert app.docs_url == "/api/v1/docs"
     assert app.redoc_url == "/api/v1/redoc"
     assert app.openapi_url == "/api/v1/openapi.json"
-
-
-def test_create_app_uses_configured_app_name_and_api_prefix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    get_settings.cache_clear()
-    monkeypatch.setenv("APP_NAME", "Configured App")
-    monkeypatch.setenv("API_PREFIX", "/custom")
-
-    try:
-        configured_app = create_app()
-
-        assert configured_app.title == "Configured App"
-        assert configured_app.docs_url == "/custom/docs"
-        assert configured_app.redoc_url == "/custom/redoc"
-        assert configured_app.openapi_url == "/custom/openapi.json"
-
-        response = request_with_service(
-            FakeMessageRoutingService(),
-            "POST",
-            "/custom/messages/route",
-            target_app=configured_app,
-            json={"email": "sender@example.com", "message": "Hello"},
-        )
-        assert response.status_code == 200
-    finally:
-        get_settings.cache_clear()
 
 
 def test_health_endpoint_returns_ok() -> None:
@@ -149,275 +72,9 @@ def test_api_docs_and_openapi_paths_are_available() -> None:
     assert request("GET", "/api/v1/docs/oauth2-redirect").status_code == 404
 
 
-def test_openapi_message_route_schemas_include_examples() -> None:
-    response = request("GET", "/api/v1/openapi.json")
-    schemas = response.json()["components"]["schemas"]
-
-    assert schemas["MessageRouteRequest"]["examples"] == [
-        {
-            "email": "jan.nowak@example.com",
-            "message": "Nie działa mi komputer",
-        }
-    ]
-    assert schemas["MessageRouteResponse"]["examples"] == [
-        {
-            "status": "sent",
-            "recipient": "help-desk@example.com",
-            "reply_to": "jan.nowak@example.com",
-            "subject": "Zgłoszenie skierowane do: help-desk@example.com",
-            "reason": "Wiadomość dotyczy problemu ze sprzętem komputerowym.",
-            "used_fallback": False,
-            "model": "qwen2.5:3b",
-            "routing_confidence": "high",
-        }
-    ]
-
-
-def test_openapi_message_route_operation_is_documented() -> None:
-    response = request("GET", "/api/v1/openapi.json")
-    operation = response.json()["paths"]["/api/v1/messages/route"]["post"]
-
-    assert operation["summary"] == "Route a message to an internal department"
-    assert "Ollama" in operation["description"]
-    assert "send_email" in operation["description"]
-    assert "Reply-To" in operation["description"]
-    assert operation["responses"]["422"]["description"] == "Validation error."
-    assert operation["responses"]["502"]["description"] == (
-        "Upstream failure: the Ollama chat request failed, or the email "
-        "could not be delivered via SMTP."
-    )
-    assert operation["responses"]["503"]["description"] == "Ollama is unavailable."
-    # Every handled error status documents the ErrorResponse schema rather than an
-    # undocumented free-form object (loop so dropping any one $ref is caught).
-    for status in ("400", "413", "429", "502", "503"):
-        schema = operation["responses"][status]["content"]["application/json"]["schema"]
-        assert schema["$ref"].endswith("/ErrorResponse"), status
-
-
-def test_message_route_exists_under_api_v1() -> None:
-    response = request_with_service(
-        FakeMessageRoutingService(),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "sent"
-
-
-def test_message_route_rejects_invalid_email() -> None:
-    response = request(
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "not-an-email", "message": "Hello"},
-    )
-
-    assert response.status_code == 422
-
-
-def test_message_route_rejects_internationalized_email() -> None:
-    # EAI addresses (Unicode in local-part or domain) are accepted by EmailStr
-    # but would produce a malformed Reply-To header, so the API rejects them.
-    for email in ("jań@example.com", "jan@münchen.example"):
-        response = request(
-            "POST",
-            "/api/v1/messages/route",
-            json={"email": email, "message": "Hello"},
-        )
-
-        assert response.status_code == 422, email
-
-
-def test_message_route_accepts_sender_from_external_domain() -> None:
-    # The sender address is self-reported and intentionally not restricted to a
-    # fixed domain (see README, "Bezpieczeństwo i wyłapane pułapki"). A sender from
-    # an external domain must pass validation and reach the routing service
-    # unchanged; only the recipient is constrained to the allowed departments.
-    service = FakeMessageRoutingService()
-
-    response = request_with_service(
-        service,
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "outsider@gmail.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 200
-    assert service.requests[0].email == "outsider@gmail.com"
-
-
-def test_message_route_rejects_missing_message() -> None:
-    response = request(
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com"},
-    )
-
-    assert response.status_code == 422
-
-
-def test_message_route_rejects_empty_message() -> None:
-    response = request(
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": ""},
-    )
-
-    assert response.status_code == 422
-
-
-def test_message_route_rejects_whitespace_only_message() -> None:
-    response = request(
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "   "},
-    )
-
-    assert response.status_code == 422
-
-
-def test_message_route_rejects_message_over_max_length() -> None:
-    response = request(
-        "POST",
-        "/api/v1/messages/route",
-        json={
-            "email": "sender@example.com",
-            "message": "x" * (MESSAGE_MAX_LENGTH + 1),
-        },
-    )
-
-    assert response.status_code == 422
-
-
-def test_message_route_valid_payload_returns_expected_response_fields() -> None:
-    response = request_with_service(
-        FakeMessageRoutingService(),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "sent",
-        "recipient": "help-desk@example.com",
-        "reply_to": "sender@example.com",
-        "subject": "Zgłoszenie skierowane do: help-desk@example.com",
-        "reason": "The message concerns a computer issue.",
-        "used_fallback": False,
-        "model": "qwen2.5:3b",
-        "routing_confidence": "high",
-    }
-
-
-def test_message_route_delegates_to_message_routing_service() -> None:
-    service = FakeMessageRoutingService()
-
-    response = request_with_service(
-        service,
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 200
-    assert len(service.requests) == 1
-    assert service.requests[0].email == "sender@example.com"
-    assert service.requests[0].message == "Hello"
-
-
-def test_local_eval_route_rejects_non_mailpit_smtp_before_sending(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = FakeMessageRoutingService()
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
-    monkeypatch.setenv("SMTP_PORT", "587")
-    get_settings.cache_clear()
-    try:
-        response = request_with_service(
-            service,
-            "POST",
-            "/api/v1/messages/route-local-eval",
-            json={"email": "sender@example.com", "message": "Hello"},
-        )
-        assert response.status_code == 409
-        assert service.requests == []
-    finally:
-        get_settings.cache_clear()
-
-
-def test_local_eval_route_accepts_mailpit_smtp(monkeypatch: pytest.MonkeyPatch) -> None:
-    service = FakeMessageRoutingService()
-    monkeypatch.setenv("SMTP_HOST", "mailpit")
-    monkeypatch.setenv("SMTP_PORT", "1025")
-    get_settings.cache_clear()
-    try:
-        response = request_with_service(
-            service,
-            "POST",
-            "/api/v1/messages/route-local-eval",
-            json={"email": "sender@example.com", "message": "Hello"},
-        )
-        assert response.status_code == 200
-        assert len(service.requests) == 1
-    finally:
-        get_settings.cache_clear()
-
-
 def test_local_eval_route_is_hidden_from_openapi() -> None:
     schema = request("GET", "/api/v1/openapi.json").json()
     assert "/api/v1/messages/route-local-eval" not in schema["paths"]
-
-
-def test_message_route_maps_ollama_unavailable_to_503() -> None:
-    response = request_with_service(
-        RaisingMessageRoutingService(OllamaUnavailableError("Ollama unavailable")),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Ollama is unavailable."
-
-
-def test_message_route_maps_ollama_chat_error_to_502() -> None:
-    response = request_with_service(
-        RaisingMessageRoutingService(OllamaChatError("Ollama chat failed")),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 502
-    assert response.json()["detail"] == "Ollama chat request failed."
-
-
-def test_message_route_maps_email_delivery_error_to_502() -> None:
-    response = request_with_service(
-        RaisingMessageRoutingService(smtplib.SMTPException("SMTP failed")),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 502
-    assert response.json()["detail"] == "Email delivery failed."
-
-
-def test_message_route_maps_expected_value_error_to_400() -> None:
-    response = request_with_service(
-        RaisingMessageRoutingService(ValueError("Invalid tool arguments")),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "The request could not be processed."
-    # The raw exception message must never leak to the client.
-    assert "Invalid tool arguments" not in response.text
 
 
 class FakeReadinessProbe:
@@ -542,41 +199,6 @@ def test_request_id_header_rejects_short_disallowed_charset() -> None:
     assert echoed.isalnum()  # none of the disallowed chars survived
 
 
-def test_request_id_reaches_sync_endpoint_log_records() -> None:
-    # End-to-end: a known X-Request-ID must appear in a log record emitted by the
-    # SYNC route_message handler, which FastAPI runs in the anyio threadpool. This is
-    # why RequestIdMiddleware is pure-ASGI (the ContextVar is copied into
-    # the worker thread); a revert to BaseHTTPMiddleware would silently break it.
-    import io
-    import logging as stdlib_logging
-
-    from app.observability import JsonLogFormatter
-
-    stream = io.StringIO()
-    handler = stdlib_logging.StreamHandler(stream)
-    handler.setFormatter(JsonLogFormatter())
-    routes_logger = stdlib_logging.getLogger("app.api.routes")
-    routes_logger.addHandler(handler)
-    previous_level = routes_logger.level
-    routes_logger.setLevel(stdlib_logging.WARNING)
-    try:
-        response = request_with_service(
-            RaisingMessageRoutingService(ValueError("boom")),
-            "POST",
-            "/api/v1/messages/route",
-            headers={"X-Request-ID": "known-sync-id-123"},
-            json={"email": "sender@example.com", "message": "Hello"},
-        )
-    finally:
-        routes_logger.removeHandler(handler)
-        routes_logger.setLevel(previous_level)
-
-    assert response.status_code == 400
-    logged = stream.getvalue()
-    assert '"request_id": "known-sync-id-123"' in logged
-    assert "Rejected message route request" in logged
-
-
 def test_route_rejects_oversized_body_before_validation() -> None:
     # Body far over MAX_REQUEST_BODY_BYTES -> 413 from the ASGI guard, BEFORE the
     # Pydantic max_length 422, proving rejection happens before buffering/validation.
@@ -593,35 +215,32 @@ def test_route_rejects_oversized_body_before_validation() -> None:
     assert response.headers.get("x-request-id")
 
 
-def test_route_rejects_oversized_chunked_body_without_content_length() -> None:
-    # A chunked / streaming body has no Content-Length, so the fast-path check cannot
-    # see it; the streaming guard must count actual bytes and still return 413.
-    # Without it, a chunked body would bypass the limit and be buffered in full.
-    async def chunks() -> AsyncIterator[bytes]:
-        for _ in range(40):
-            yield b"x" * 4096  # ~160 KB total, far over MAX_REQUEST_BODY_BYTES
-
-    response = request("POST", "/api/v1/messages/route", content=chunks())
-
-    assert response.status_code == 413
-    # The streaming-guard 413 also flows out through RequestIdMiddleware (outermost).
-    assert response.headers.get("x-request-id")
-
-
-def test_route_returns_429_when_at_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
-    import threading
-
-    from app.api import routes as routes_module
-
-    busy = threading.BoundedSemaphore(1)
-    busy.acquire()  # exhaust the only permit so the route's acquire fails
-    monkeypatch.setattr(routes_module, "_route_semaphore", busy)
-
-    response = request_with_service(
-        FakeMessageRoutingService(),
-        "POST",
-        "/api/v1/messages/route",
-        json={"email": "sender@example.com", "message": "Hello"},
+def test_create_app_uses_configured_app_name_and_api_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_NAME", "Configured App")
+    monkeypatch.setenv("API_PREFIX", "/custom")
+    get_settings.cache_clear()
+    target = create_app()
+    assert target.title == "Configured App"
+    assert target.docs_url == "/custom/docs"
+    assert target.redoc_url == "/custom/redoc"
+    assert target.openapi_url == "/custom/openapi.json"
+    assert (
+        request_app(
+            target,
+            "POST",
+            "/custom/messages/route",
+            json={"email": "person@example.com", "message": "Issue"},
+        ).status_code
+        == 409
     )
 
-    assert response.status_code == 429
+
+def test_legacy_operation_documents_required_review() -> None:
+    operation = request("GET", "/api/v1/openapi.json").json()["paths"]["/api/v1/messages/route"][
+        "post"
+    ]
+    assert "409" in operation["responses"]
+    assert "200" not in operation["responses"]
+    assert operation["deprecated"] is True

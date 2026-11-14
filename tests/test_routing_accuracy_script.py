@@ -1,9 +1,7 @@
 import importlib.util
-import json
 import os
 import subprocess
 import sys
-import urllib.request
 from collections import Counter
 from pathlib import Path
 from types import ModuleType
@@ -35,10 +33,10 @@ def test_routing_accuracy_cases_cover_all_departments() -> None:
     assert expected == ALLOWED_RECIPIENTS
 
 
-def test_routing_accuracy_uses_route_endpoint_and_domain_recipients() -> None:
+def test_routing_accuracy_uses_review_endpoint_and_domain_recipients() -> None:
     script = read_script()
 
-    assert "/api/v1/messages/route" in script
+    assert "/api/v1/review/previews" in script
     assert "from app.domain.departments import ALLOWED_RECIPIENTS" in script
 
 
@@ -130,38 +128,44 @@ def test_run_boundary_cases_resolves_within_acceptable_set(
     assert f"resolved within acceptable set: {total}/{total}" in out
 
 
-def test_route_posts_payload_to_route_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_route_only_previews_suggests_and_rejects_without_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = load_module()
-    captured: dict[str, Any] = {}
+    calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
-    class _FakeResponse:
-        def __enter__(self) -> "_FakeResponse":
-            return self
+    class FakeReviewClient:
+        def __init__(self, base_url: str, *, timeout: int) -> None:
+            assert base_url == module.API_BASE_URL
+            assert timeout == module.REQUEST_TIMEOUT_SECONDS
 
-        def __exit__(self, *args: object) -> None:
-            return None
+        def start_session(self) -> None:
+            calls.append(("session", "", None))
 
-        def read(self) -> bytes:
-            return b'{"recipient": "it@example.com"}'
+        def request(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+            calls.append((method, path, payload))
+            if path.endswith("/suggest"):
+                return {
+                    "version": 1,
+                    "suggestion": {"status": "ready", "recipient": "it@example.com"},
+                }
+            return {"id": "test-preview", "version": 1}
 
-    def fake_urlopen(request: urllib.request.Request, timeout: object = None) -> "_FakeResponse":
-        captured["url"] = request.full_url
-        captured["method"] = request.get_method()
-        captured["data"] = request.data
-        return _FakeResponse()
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
-    result = module.route("Nie dziala komputer")
-
-    assert result == {"recipient": "it@example.com"}
-    assert str(captured["url"]).endswith("/api/v1/messages/route")
-    assert captured["method"] == "POST"
-    assert json.loads(captured["data"]) == {
-        "email": module.SENDER_EMAIL,
-        "message": "Nie dziala komputer",
-    }
-    module.route("Nie dziala komputer", require_local_smtp=True)
-    assert str(captured["url"]).endswith("/api/v1/messages/route-local-eval")
+    monkeypatch.setattr(module, "ReviewClient", FakeReviewClient)
+    for local_flag in (False, True):
+        calls.clear()
+        result = module.route("Nie dziala komputer", require_local_smtp=local_flag)
+        assert result == {"status": "ready", "recipient": "it@example.com"}
+        assert calls == [
+            ("session", "", None),
+            (
+                "POST",
+                "/api/v1/review/previews",
+                {"email": module.SENDER_EMAIL, "message": "Nie dziala komputer"},
+            ),
+            ("POST", "/api/v1/review/previews/test-preview/suggest", {"version": 1}),
+            ("POST", "/api/v1/review/previews/test-preview/reject", {"version": 1}),
+        ]
 
 
 def test_held_out_cases_cover_all_departments() -> None:

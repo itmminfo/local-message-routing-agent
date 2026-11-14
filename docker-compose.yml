@@ -32,6 +32,12 @@ services:
       SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
       MAX_CONCURRENT_ROUTE_REQUESTS: ${MAX_CONCURRENT_ROUTE_REQUESTS:-8}
       MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-65536}
+      REVIEW_DATABASE_PATH: /data/review.sqlite3
+      REVIEW_ALLOWED_ORIGINS: '${REVIEW_ALLOWED_ORIGINS:-["http://localhost:8000","http://127.0.0.1:8000"]}'
+      REVIEW_SESSION_TTL_SECONDS: ${REVIEW_SESSION_TTL_SECONDS:-28800}
+      REVIEW_PREVIEW_TTL_SECONDS: ${REVIEW_PREVIEW_TTL_SECONDS:-1800}
+    volumes:
+      - review-data:/data
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -39,8 +45,6 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
-      ollama-init:
-        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -121,6 +125,7 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       MAIL_API_URL: http://mailpit:8025
+      REVIEW_ORIGIN: ${REVIEW_ORIGIN:-http://127.0.0.1:8000}
       # Mirror api SMTP settings so the adversarial evaluator refuses a
       # 40-message run if .env points api at anything other than Mailpit.
       EVAL_SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -134,3 +139,4 @@ services:
 
 volumes:
   ollama-data:
+  review-data:
