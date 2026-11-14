@@ -87,6 +87,20 @@ def test_initial_page_requires_explicit_department_and_confirmation() -> None:
     assert page.by_id("original-message")["tabindex"] == "0"
 
 
+def test_recovery_controls_preserve_an_unread_result_and_require_a_separate_warning() -> None:
+    page = PageElements(get_page("/").text)
+
+    assert "hidden" in page.by_id("recovery-panel")
+    assert page.by_id("resolve-status")["type"] == "button"
+    assert page.by_id("withdraw-preview")["type"] == "button"
+    assert "hidden" in page.by_id("withdraw-preview")
+    assert page.by_id("accept-context-loss")["type"] == "checkbox"
+    assert "checked" not in page.by_id("accept-context-loss")
+    assert "disabled" in page.by_id("abandon-context")
+    assert "hidden" in page.by_id("abandon-context")
+    assert "hidden" in page.by_id("previous-operation")
+
+
 def test_page_loads_only_explicit_local_assets_and_has_no_inline_handlers() -> None:
     page = PageElements(get_page("/").text)
 

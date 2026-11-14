@@ -134,7 +134,13 @@ def retry(
     preview_id: str, payload: RetryRequest, session: Operator, service: Service
 ) -> PreviewRecord:
     try:
-        return service.retry(preview_id, session.key, payload.version, payload.payload_digest)
+        return service.retry(
+            preview_id,
+            session.key,
+            payload.version,
+            payload.payload_digest,
+            payload.expected_attempt_id,
+        )
     except (ReviewConflict, ReviewNotFound, LocalMailpitRequired) as exc:
         raise translate_error(exc) from exc
 

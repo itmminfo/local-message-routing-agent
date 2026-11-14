@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from app.config import get_settings
+from app.infrastructure.mail_sender import MailDeliveryError
 from app.main import create_app
 from app.observability import JsonLogFormatter
 from app.review.routes import get_review_proposer, get_review_sender
@@ -32,6 +33,7 @@ class RecordingSender:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, str]] = []
+        self.error: Exception | None = None
         self.entered = threading.Event()
         self.release = threading.Event()
         self.release.set()
@@ -50,6 +52,8 @@ class RecordingSender:
         )
         self.entered.set()
         assert self.release.wait(5), "test did not release SMTP barrier"
+        if self.error is not None:
+            raise self.error
         return object()
 
 
@@ -330,3 +334,80 @@ def test_rejected_preview_cannot_be_approved(review: ReviewHarness) -> None:
         review.post(f"/previews/{record['id']}/approve", review.approval(record)).status_code == 409
     )
     assert review.sender.calls == []
+
+
+def test_retry_replay_cannot_start_another_attempt_after_its_first_successor_fails(
+    review: ReviewHarness,
+) -> None:
+    record = review.create()
+    review.sender.error = MailDeliveryError("before_data", "No DATA was submitted")
+    first = review.post(f"/previews/{record['id']}/approve", review.approval(record)).json()
+    retry_payload = {
+        "version": record["version"],
+        "payload_digest": record["payload_digest"],
+        "expected_attempt_id": first["attempts"][-1]["id"],
+    }
+    path = f"/previews/{record['id']}/retry"
+    response = review.post(path, retry_payload)
+    assert response.status_code == 200, response.text
+    second = response.json()
+    assert second["state"] == "failed_before_submit"
+    assert len(second["attempts"]) == len(review.sender.calls) == 2
+    review.sender.error = None
+    replay = review.post(path, retry_payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["state"] == "failed_before_submit"
+    assert len(replay.json()["attempts"]) == len(review.sender.calls) == 2
+    fresh_intent = {**retry_payload, "expected_attempt_id": second["attempts"][-1]["id"]}
+    sent = review.post(path, fresh_intent)
+    assert sent.status_code == 200, sent.text
+    assert sent.json()["state"] == "sent"
+    assert len(sent.json()["attempts"]) == len(review.sender.calls) == 3
+    stale = review.post(path, retry_payload)
+    assert stale.status_code == 200
+    assert stale.json()["state"] == "sent"
+    assert len(stale.json()["attempts"]) == len(review.sender.calls) == 3
+
+
+@pytest.mark.parametrize("expected_id", [None, "bad", "f" * 32, "foreign"])
+def test_retry_requires_the_failed_attempt_of_this_preview(
+    review: ReviewHarness,
+    expected_id: str | None,
+) -> None:
+    record = review.create()
+    review.sender.error = MailDeliveryError("before_data", "No DATA was submitted")
+    first = review.post(f"/previews/{record['id']}/approve", review.approval(record)).json()
+    payload = {"version": record["version"], "payload_digest": record["payload_digest"]}
+    if expected_id == "foreign":
+        other = review.create()
+        foreign = review.post(f"/previews/{other['id']}/approve", review.approval(other)).json()
+        payload["expected_attempt_id"] = foreign["attempts"][-1]["id"]
+    elif expected_id is not None:
+        payload["expected_attempt_id"] = expected_id
+    before_calls = len(review.sender.calls)
+    review.sender.error = None
+    response = review.post(f"/previews/{record['id']}/retry", payload)
+    assert response.status_code == (422 if expected_id in (None, "bad") else 409), response.text
+    assert len(review.sender.calls) == before_calls
+    saved = review.client.get(f"{BASE}/previews/{record['id']}").json()
+    assert saved == first
+
+
+def test_retry_of_unknown_delivery_is_rejected_even_with_its_real_attempt_id(
+    review: ReviewHarness,
+) -> None:
+    record = review.create()
+    review.sender.error = MailDeliveryError("unknown", "DATA ACK was not received")
+    first = review.post(f"/previews/{record['id']}/approve", review.approval(record)).json()
+    assert first["state"] == "delivery_unknown"
+    response = review.post(
+        f"/previews/{record['id']}/retry",
+        {
+            "version": record["version"],
+            "payload_digest": record["payload_digest"],
+            "expected_attempt_id": first["attempts"][-1]["id"],
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert len(review.sender.calls) == 1
+    assert review.client.get(f"{BASE}/previews/{record['id']}").json() == first

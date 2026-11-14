@@ -29,11 +29,15 @@ class VersionRequest(StrictRequest):
     version: int = Field(ge=1, strict=True)
 
 
-class RetryRequest(VersionRequest):
+class PayloadVersionRequest(VersionRequest):
     payload_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
-class ApproveRequest(RetryRequest):
+class RetryRequest(PayloadVersionRequest):
+    expected_attempt_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class ApproveRequest(PayloadVersionRequest):
     recipient: DepartmentEmail
     confirmed: Literal[True]
 

@@ -53,6 +53,24 @@
           <span id="state-label" class="state-label" role="status" aria-live="polite" aria-atomic="true">Brak podglądu</span>
         </div>
 
+        <section id="recovery-panel" class="delivery-result" data-state="unresolved" hidden aria-labelledby="recovery-title">
+          <h3 id="recovery-title">Nie można potwierdzić stanu operacji</h3>
+          <p id="recovery-description" role="status" aria-live="polite"></p>
+          <p class="operation-reference">Identyfikator: <code id="recovery-id"></code></p>
+          <button id="resolve-status" class="button secondary" type="button">Sprawdź ponownie stan</button>
+          <button id="withdraw-preview" class="button secondary" type="button" hidden>Wycofaj podgląd</button>
+          <label id="context-loss-confirmation" class="confirmation" hidden>
+            <input id="accept-context-loss" type="checkbox">
+            <span>Rozumiem, że poprzednia wiadomość mogła zostać wysłana. Sprawdziłem Mailpit. Nowe zgłoszenie może utworzyć kopię.</span>
+          </label>
+          <button id="abandon-context" class="button secondary" type="button" hidden disabled>Otwórz nowy formularz mimo braku wyniku</button>
+        </section>
+
+        <aside id="previous-operation" class="notice" data-kind="info" hidden>
+          <p>Poprzednia operacja bez odczytanego wyniku: <code id="previous-operation-id"></code>.</p>
+          <p>Otwarcie nowego formularza nie potwierdza braku wcześniejszej wysyłki. Sprawdź Mailpit przed wysłaniem tej samej treści.</p>
+        </aside>
+
         <div id="empty-preview" class="empty-preview">
           <div class="document-mark" aria-hidden="true"><span></span><span></span><span></span></div>
           <p>Tutaj pojawi się zapisany oryginał.</p>

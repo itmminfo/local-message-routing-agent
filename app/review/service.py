@@ -117,6 +117,7 @@ class ReviewService:
         session_key: str,
         version: int,
         payload_digest: str,
+        expected_attempt_id: str,
     ) -> PreviewRecord:
         self._require_local_sender()
         record, attempt_id = self.store.begin_retry(
@@ -124,6 +125,7 @@ class ReviewService:
             session_key,
             version,
             payload_digest,
+            expected_attempt_id,
         )
         return record if attempt_id is None else self._deliver(record, session_key, attempt_id)
 

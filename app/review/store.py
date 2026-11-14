@@ -297,7 +297,12 @@ class ReviewStore:
     def get_preview(self, preview_id: str, session_key: str) -> PreviewRecord:
         db = self._connect()
         try:
-            return self._record(db, self._row(db, preview_id, session_key))
+            # The preview row and its attempts form one recovery decision.
+            # A deferred read transaction keeps both SELECTs in one snapshot
+            # without acquiring the writer reservation used by mutations.
+            with db:
+                db.execute("BEGIN")
+                return self._record(db, self._row(db, preview_id, session_key))
         finally:
             db.close()
 
@@ -409,16 +414,16 @@ class ReviewStore:
             return self._record(db, self._row(db, preview_id, session_key)), attempt_id
 
     def begin_retry(
-        self, preview_id: str, session_key: str, version: int, digest: str
+        self,
+        preview_id: str,
+        session_key: str,
+        version: int,
+        digest: str,
+        expected_attempt_id: str,
     ) -> tuple[PreviewRecord, str | None]:
         with self._transaction() as db:
             row = self._row(db, preview_id, session_key)
             self._check_version(row, version, digest)
-            if row["state"] == "sending":
-                return self._record(db, row), None
-            if row["state"] != "failed_before_submit":
-                raise ReviewConflict("Ponowienie jest dostępne wyłącznie przed przekazaniem DATA.")
-            self._check_not_expired(row)
             approval = db.execute(
                 "SELECT * FROM approvals WHERE preview_id=?", (preview_id,)
             ).fetchone()
@@ -430,6 +435,36 @@ class ReviewStore:
                 or approval["recipient"] != row["recipient"]
             ):
                 raise ReviewConflict("Brak zgodnego zatwierdzenia.")
+            expected_attempt = db.execute(
+                "SELECT sequence,state FROM attempts WHERE id=? AND preview_id=?",
+                (expected_attempt_id, preview_id),
+            ).fetchone()
+            if expected_attempt is None or expected_attempt["state"] != "failed_before_submit":
+                raise ReviewConflict("Ponowienie wymaga wskazania nieprzekazanej próby.")
+            # Attempts are append-only, consecutive and unique per preview. The
+            # initial approval is sequence 1; every later sequence is the single
+            # retry of its predecessor. This durable link also covers old rows,
+            # so an HTTP replay cannot create another successor after a fast
+            # pre-DATA failure, a later retry, or a process restart.
+            successor = db.execute(
+                "SELECT id FROM attempts WHERE preview_id=? AND sequence=?",
+                (preview_id, expected_attempt["sequence"] + 1),
+            ).fetchone()
+            if successor is not None:
+                return self._record(db, row), None
+            latest = db.execute(
+                "SELECT id FROM attempts WHERE preview_id=? ORDER BY sequence DESC LIMIT 1",
+                (preview_id,),
+            ).fetchone()
+            if (
+                row["state"] != "failed_before_submit"
+                or latest is None
+                or latest["id"] != expected_attempt_id
+            ):
+                raise ReviewConflict(
+                    "Ponowienie jest dostępne tylko dla ostatniej nieprzekazanej próby."
+                )
+            self._check_not_expired(row)
             attempt_id = self._start_attempt(db, row)
             return self._record(db, self._row(db, preview_id, session_key)), attempt_id
 
@@ -462,8 +497,13 @@ class ReviewStore:
         with self._transaction() as db:
             row = self._row(db, preview_id, session_key)
             self._check_version(row, version)
-            self._check_not_expired(row)
-            if row["state"] != "pending_review":
+            if row["state"] == "rejected":
+                return self._record(db, row)
+            # This write is a fence against delayed approval/retry requests, not
+            # merely a UI dismissal. It remains available after virtual expiry
+            # and after a known pre-DATA failure; BEGIN IMMEDIATE serializes it
+            # with either delivery transition. Keep approval and attempt history.
+            if row["state"] not in {"pending_review", "failed_before_submit"}:
                 raise ReviewConflict("Nie można odrzucić rozpoczętej lub zamkniętej operacji.")
             db.execute(
                 "UPDATE previews SET state='rejected',suggestion_token=NULL WHERE id=?",

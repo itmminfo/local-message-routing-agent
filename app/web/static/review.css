@@ -91,7 +91,10 @@ summary { cursor: pointer; font-size: .74rem; color: var(--muted); }
 .review-footer { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
 .review-footer p { margin: 0; font-size: .7rem; }
 .delivery-result { padding: 1rem; margin: 1rem 0; background: var(--soft-accent); border-left: 3px solid var(--accent); }
-.delivery-result[data-state="delivery_unknown"], .delivery-result[data-state="sending"] { background: var(--warning-bg); border-color: var(--warning); }
+.delivery-result[data-state="delivery_unknown"], .delivery-result[data-state="sending"], .delivery-result[data-state="unresolved"] { background: var(--warning-bg); border-color: var(--warning); }
+.state-label[data-state="unresolved"] { color: var(--warning); }
+.operation-reference, #previous-operation code { overflow-wrap: anywhere; }
+#resolve-status, #abandon-context { margin-top: .7rem; }
 .delivery-result[data-state="failed_before_submit"] { background: var(--error-bg); border-color: var(--error); }
 .delivery-result p { margin: .5rem 0 0; font-size: .84rem; }
 .delivery-identifiers { margin: .9rem 0 0; font-size: .7rem; }

@@ -30,6 +30,23 @@ odbywają się poza transakcją. Spóźniony model nie zmienia zatwierdzonej ope
 Blokada procesu pozwala uruchomić jeden backend dla danej bazy. Po restarcie
 osierocone sending staje się delivery_unknown, bez ponownej wysyłki.
 
+Ręczne retry wiąże `expected_attempt_id` z konkretną nieudaną próbą.
+Append-only kolejność prób i transakcja dopuszczają tylko jednego jej następcę.
+Replay nie staje się nowym gestem operatora, także gdy poprzedni retry szybko
+zakończył się błędem i backend od tego czasu uruchomił się ponownie.
+
+Formularz nie porzuca ID i nie odblokowuje nowej operacji po utracie odpowiedzi
+wysyłki lub przejściowym błędzie odczytu. Najpierw musi uzgodnić stan z backendem.
+Po definitywnym braku dostępu zachowuje referencję do starego ID; rozpoczęcie nowego
+zgłoszenia wymaga osobnego potwierdzenia ostrzeżenia o możliwej kopii.
+
+Znacznik wysyłanego żądania zapisuje się przed POST i przetrwa reload. Odczyt starego
+pending_review lub tej samej nieudanej próby nie rozstrzyga, czy opóźniony POST
+zostanie jeszcze wykonany. Jawne reject pod blokadą zapisu może wycofać
+pending_review lub failed_before_submit także po TTL, zachowując próby i zgodę.
+Nie odwołuje rozpoczętego SMTP. GET pobiera rekord i listę prób w jednym snapshotcie
+SQLite, więc nie połączy starego stanu z wynikiem nowszej próby.
+
 Nadawca sprawdza rzeczywiste mailpit:1025 oraz allowlistę pięciu działów i CR/LF
 nagłówków. Message-ID jest zapisany przed próbą. Błąd przed DATA dopuszcza ręczny
 retry tej samej zgody. Utrata potwierdzenia po możliwym DATA blokuje retry.

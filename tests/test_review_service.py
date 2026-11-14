@@ -79,7 +79,9 @@ def test_delivery_failure_only_allows_manual_retry_before_submission(
     assert len(sender.calls) == 1
     sender.error = None
     if phase == "before_data":
-        sent = service.retry(record.id, "operator", record.version, record.payload_digest)
+        sent = service.retry(
+            record.id, "operator", record.version, record.payload_digest, result.attempts[-1].id
+        )
         assert sent.state == "sent"
         assert len(sent.attempts) == 2
         assert sender.calls[0] == sender.calls[1]
@@ -87,7 +89,9 @@ def test_delivery_failure_only_allows_manual_retry_before_submission(
         from app.review.store import ReviewConflict
 
         with pytest.raises(ReviewConflict):
-            service.retry(record.id, "operator", record.version, record.payload_digest)
+            service.retry(
+                record.id, "operator", record.version, record.payload_digest, result.attempts[-1].id
+            )
         assert len(sender.calls) == 1
 
 
@@ -159,3 +163,50 @@ def test_rejected_header_is_retryable_before_any_smtp_connection(service: Review
     assert result.state == "failed_before_submit"
     assert result.retry_allowed is True
     assert len(result.attempts) == 1
+
+
+def test_retry_request_replayed_after_failure_and_restart_cannot_send_without_a_new_intent(
+    service: ReviewService,
+) -> None:
+    sender = service.mail_sender
+    assert isinstance(sender, ControlledSender)
+    sender.error = MailDeliveryError("before_data", "SMTP did not receive DATA")
+    original = service.create_preview("operator", "person@example.com", "Original content")
+    first = service.approve(
+        original.id, "operator", original.version, original.payload_digest, "it@example.com"
+    )
+    expected_id = first.attempts[-1].id
+    second = service.retry(
+        original.id, "operator", original.version, original.payload_digest, expected_id
+    )
+    assert second.state == "failed_before_submit"
+    assert len(sender.calls) == 2
+    service.store.close()
+    restored = ReviewStore(service.store.path)
+    restored.start()
+    try:
+        service.store = restored
+        sender.error = None
+        replay = service.retry(
+            original.id, "operator", original.version, original.payload_digest, expected_id
+        )
+        assert replay.state == "failed_before_submit"
+        assert len(replay.attempts) == 2
+        assert len(sender.calls) == 2
+        sent = service.retry(
+            original.id,
+            "operator",
+            original.version,
+            original.payload_digest,
+            second.attempts[-1].id,
+        )
+        assert sent.state == "sent"
+        assert len(sent.attempts) == 3
+        assert len(sender.calls) == 3
+        replay_after_sent = service.retry(
+            original.id, "operator", original.version, original.payload_digest, expected_id
+        )
+        assert replay_after_sent.state == "sent"
+        assert len(sender.calls) == 3
+    finally:
+        restored.close()

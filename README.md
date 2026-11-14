@@ -43,7 +43,8 @@ Model i żądanie approve nie mogą zmienić treści ani nagłówków wysyłanej
 ## Trwałość i niepewna wysyłka
 
 Wolumen `review-data` przechowuje SQLite w `/data/review.sqlite3`, również sesje,
-oryginały, zgody i próby. Przeglądarka zapisuje w sessionStorage wyłącznie ID.
+oryginały, zgody i próby. Przeglądarka zapisuje w sessionStorage identyfikatory
+i rodzaj nierozstrzygniętego żądania, bez treści wiadomości i danych sesji.
 Odświeżenie tej samej karty odzyskuje zapisany podgląd. Sesja trwa 8 godzin,
 podgląd można zatwierdzić przez 30 minut. Dane nie są automatycznie kasowane.
 
@@ -59,6 +60,19 @@ Podwójne kliknięcie lub replay approve nie rozpoczyna drugiej próby. Nie ma
 atomowej transakcji SQLite + SMTP ani gwarancji exactly-once. Po przerwaniu
 procesu stan sending przechodzi konserwatywnie do delivery_unknown. Blokada
 procesu dopuszcza tylko jeden backend dla danej bazy; nie uruchamiaj wielu workerów.
+
+Retry wymaga `expected_attempt_id`, czyli ID nieudanej próby widzianej przez
+operatora. Ta sama próba może mieć tylko jednego następcę. Powtórzenie starego
+żądania nie uruchomi kolejnej wysyłki, także po szybkim błędzie przed DATA i
+restarcie. Kolejny ręczny retry wskazuje ID nowej nieudanej próby.
+
+Przed wysyłką formularz utrwala znacznik żądania. Utrata odpowiedzi lub przejściowy
+błąd odczytu zachowuje kontekst także po odświeżeniu. Stary stan bez nowej próby
+nie dowodzi, że opóźnione żądanie nie zostanie wykonane. Operator może wycofać
+niewysłaną operację; atomowe odrzucenie blokuje późną zgodę lub retry.
+Brak dostępu po wygaśnięciu sesji
+nie oznacza braku wysyłki. Formularz wymaga osobnej świadomej decyzji, zanim pozwoli
+odłożyć taką sprawę i rozpocząć nowe zgłoszenie.
 
 Zatrzymuj przez `docker compose down`. Nie używaj `down -v`, jeśli chcesz zachować
 sesje, zgody i modele. Backup wykonuj przy zatrzymanym API i zachowaj cały wolumen.
@@ -112,10 +126,14 @@ ruff check .
 ruff format --check .
 mypy
 pytest
+node --test tests/review_ui.test.cjs
 bandit -r app scripts
 pip-audit -r requirements.lock -r requirements-dev.lock
 docker compose config -q
 ```
+
+Node jest potrzebny wyłącznie do testów zachowania rzeczywistego JavaScriptu
+formularza. Testy korzystają z biblioteki standardowej, bez pakietów npm.
 
 E2E używa danych syntetycznych i sam pełni rolę testowego operatora. Sprawdza brak
 maila przed zgodą, dokładne To/Reply-To/oryginał po zgodzie i jedną kopię po replay.

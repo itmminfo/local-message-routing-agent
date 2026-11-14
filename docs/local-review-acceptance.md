@@ -61,3 +61,38 @@ Testy symulują operatora; API nie dowodzi fizycznej obecności człowieka. To l
 aplikacja z zaufanym hostem. Mailpit nie jest zewnętrznym dostarczeniem. Nie ma
 gwarancji exactly-once SQLite+SMTP. Propozycje AI mogą nadal wskazywać błędny dział;
 nie przedstawiamy ręcznego wyboru jako poprawy automatycznej klasyfikacji.
+
+## Dodatkowy review PR #6, 14.11.2026
+
+Review odtworzył trzy grupy usterek:
+
+- Identyczny retry po szybkim błędzie przed DATA i restarcie mógł rozpocząć kolejną
+  próbę bez nowego gestu. Obowiązkowy expected_attempt_id wiąże retry z jedną próbą
+  i jej jedynym trwałym następcą. Działa też dla istniejących rekordów bez migracji.
+- UI tracił ID po awarii odczytu i odblokowywał nową operację po niepewnym POST.
+  Znacznik zapisany przed żądaniem przetrwa reload; sam stary GET nie rozstrzyga
+  opóźnionego żądania. Jawne wycofanie pod blokadą zapisu blokuje późny approve/retry.
+- GET mógł mieszać stan podglądu z próbami zatwierdzonymi później. Oba SELECT są
+  teraz w jednym snapshotcie SQLite. Testy odtwarzają wyścig w trybach DELETE i WAL.
+
+314 testów Pythona i 32 testy rzeczywistego review.js przeszły, razem z Ruff,
+formatem, mypy, Bandit, pip-audit obu locków i buildem. Node testy są w CI i nie
+wymagają zależności npm. Testy obejmują czerwone odtworzenia przed poprawką,
+spóźnione żądania, wycofanie po TTL, zachowanie historii, problemy sessionStorage
+oraz odrzucenie bezpośredniej próby obejścia sesji/Origin/CSRF i niezmiennej zgody.
+
+Realny Mailpit potwierdził: 16 szybkich równoległych retry tworzy jednego następcę;
+po odtworzeniu kontenera stary retry nie wysyła mimo przywrócenia SMTP; nowa ręczna
+akcja działa. Opóźniona zgoda i retry po wycofaniu nie wysyłają. Nadal przechodzą
+utrata ACK, błąd QUIT, równoległe approve i SIGKILL z delivery_unknown bez kopii.
+
+W rzeczywistym headless Chromium odtworzono utratę odpowiedzi po przyjęciu do
+Mailpit oraz opóźnioną zgodę przy pozornie starym pending_review. Po poprawce
+blokada i ID przetrwały reload, a odzyskanie po odtworzeniu kontenera pokazało
+jedną próbę sent. Wycofanie przed zwolnieniem opóźnionej zgody dało potem HTTP409,
+bez wiadomości. Widoki 1280 i 390 px sprawdzono osobno.
+
+Nie odtworzono bezpośredniego obejścia serwerowej zgody w sprawdzonym zakresie.
+Nie deklarujemy dowodu fizycznej obecności człowieka, exactly-once ani odporności
+na dowolne awarie dysku/zasilania. Nadal tylko lokalny Mailpit. PR #4 pozostaje
+osobną decyzją; review i poprawki nie oznaczają zgody na merge.

@@ -35,6 +35,9 @@ jobs:
       - name: Test (pytest)
         run: pytest
 
+      - name: Test review UI state recovery (Node, no dependencies)
+        run: node --test tests/review_ui.test.cjs
+
       - name: Audit runtime and dev dependencies (pip-audit)
         run: pip-audit -r requirements.lock -r requirements-dev.lock
 

@@ -19,8 +19,8 @@ Wszystkie ścieżki poniżej są pod /api/v1/review. Dla operacji mutujących wy
 - GET /previews/{id}: zwraca zapisany rekord bieżącej sesji, także po restarcie. Wygasły podgląd nie może być zatwierdzony.
 - POST /previews/{id}/suggest: {version}. Osobna, opcjonalna operacja modelu bez dostępu do nadawcy. Model działa poza transakcją i pod limitem współbieżności. Błąd lub odmowa zapisują jawny status sugestii, bez blokowania ręcznego wyboru. Wynik zapisuje się tylko do nadal oczekującej wersji; spóźniony wynik nie zmienia zatwierdzonego rekordu.
 - POST /previews/{id}/approve: {version,payload_digest,recipient,confirmed:true}. Tylko jawnie wybrany dozwolony adresat. Zgoda jest zapisana na serwerze i wiąże sesję, wersję, digest oryginalnego email/message oraz adresata. Serwer nie przyjmuje treści, nadawcy ani uzasadnienia do wysłania z tego żądania. Odpowiedź to aktualny rekord operacji.
-- POST /previews/{id}/retry: ponowienie wyłącznie stanu failed_before_submit, bez zmiany payloadu, wersji ani zatwierdzonego adresata. Odmawia dla delivery_unknown i sent. Replay approve dla już rozpoczętej tej samej operacji zwraca stan bez nowej próby; zmieniony adresat/digest/wersja daje konflikt.
-- POST /previews/{id}/reject: {version}, tylko przed rozpoczęciem wysyłki.
+- POST /previews/{id}/retry: {version,payload_digest,expected_attempt_id}. Nowa próba wyłącznie dla ostatniego failed_before_submit, bez zmiany payloadu ani zatwierdzonego adresata. Wskazana próba może mieć tylko jednego następcę. Replay zwraca obecny stan bez SMTP, także po błędzie potomka i restarcie; nie tworzy nowego retry dla sent/delivery_unknown. Replay approve dla już rozpoczętej tej samej operacji zwraca stan bez nowej próby; zmieniony adresat/digest/wersja daje konflikt.
+- POST /previews/{id}/reject: {version}, atomowe wycofanie pending_review lub failed_before_submit, również po upływie TTL. Zachowuje zgodę i próby, odmawia dla sending/sent/delivery_unknown. Rejected replay nie tworzy nowego zdarzenia. Odrzucenie blokuje opóźniony approve/retry przed rozpoczęciem kolejnej próby.
 
 Rekord JSON ma co najmniej: id, version, payload_digest, email, message, state, created_at, expires_at, recipient (zatwierdzony lub null), suggestion (status, recipient, reason, model, routing_confidence, used_fallback, issue_quotes, error), message_id, attempts, retry_allowed i error. Niezaufane teksty nigdy nie są interpretowane jako HTML. Ewentualne drobne rozstrzygnięcia schematu uzgadniają wykonawcy przez wspólny kontrakt, nie przez nowe decyzje użytkownika.
 
@@ -50,7 +50,7 @@ Nie deklarujemy exactly-once pomiędzy SQLite i SMTP. Trwały stan zapobiega św
 
 ## Strona
 
-Prosta własna strona HTML/CSS/JS, serwowana w tym samym originie przez FastAPI. Bez frameworka ani bundlera. Formularz nadawcy i treści, niezmienny podgląd, opcjonalna propozycja z cytatami, pięć działów bez domyślnego wyboru i jawny przycisk akceptacji. Edycja oryginału unieważnia lokalny podgląd i wymaga utworzenia nowego. Odświeżenie odzyskuje identyfikator podglądu z sessionStorage, bez zapisywania treści w przeglądarce. UI pokazuje stany sent/failed/unknown i dopuszcza retry tylko zgodnie ze stanem serwera.
+Prosta własna strona HTML/CSS/JS, serwowana w tym samym originie przez FastAPI. Bez frameworka ani bundlera. Formularz nadawcy i treści, niezmienny podgląd, opcjonalna propozycja z cytatami, pięć działów bez domyślnego wyboru i jawny przycisk akceptacji. Edycja oryginału unieważnia lokalny podgląd i wymaga utworzenia nowego. Odświeżenie odzyskuje identyfikator podglądu i znacznik nierozstrzygniętego approve/retry z sessionStorage, bez zapisywania treści lub tokenów sesji. Stary pending_review lub ta sama nieudana próba nie rozstrzygają opóźnionego POST; potrzebny dowód trwałej próby albo atomowe reject przed nowym zgłoszeniem. UI pokazuje stany sent/failed/unknown i dopuszcza retry tylko zgodnie ze stanem serwera.
 
 ## Odbiór
 
