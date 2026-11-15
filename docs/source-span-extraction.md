@@ -70,3 +70,38 @@ version is repeated after API/Ollama restart. All quality runs reject their
 previews without approval or SMTP. Synthetic mock E2E separately exercises the
 approval/delivery plumbing against an isolated local Mailpit; it does not prove
 physical human presence or real-model quality.
+
+## Local 7B comparison, 15 November 2026
+
+The measured runtime revision is `0c2e3e6b9ce0d3166ffc9545c16df648d6b4506f`;
+the baseline is main `b978830eb87ce8281fec6af9756396a089116003`. The following
+documentation-only publication does not change the measured application.
+
+| Group | Main | Main after restart | Candidate | Candidate after restart |
+|---|---:|---:|---:|---:|
+| Existing strict inputs | 93/110 | 94/110 | 107/110 | 107/110 |
+| Existing boundary inputs | 4/5 | 4/5 | 5/5 | 5/5 |
+| Fresh strict inputs | 22/24 | 22/24 | 24/24 | 24/24 |
+| Instruction-only inputs without a proposal | 6/6 | 6/6 | 6/6 | 6/6 |
+
+The candidate had two unavailable suggestions and one wrong department on the
+strict set. The kitchen-appliance case changed from unavailable to ready but
+wrong; the zero count of newly failing cases does not hide that change in error
+category. The portal case changed from wrong to correct IT with its context
+retained. All candidate decisions, quotes and reasons matched after restart.
+
+Across 580 proposal-only cases there were zero approvals and SMTP attempts;
+Mailpit stayed at 270 messages. A separate synthetic mock test on the frozen
+image preserved one message and one attempt after restart and 12 approval
+replays. It does not establish physical human presence.
+
+The median complete /suggest request increased from 2.84/2.89 seconds to
+3.48/3.47 seconds. This measures the whole application request, not tokens per
+second. Only the active local qwen2.5:7b profile was measured; default 3B quality
+was not measured. These finite results do not establish general determinism or
+prompt-injection resistance.
+
+[Frozen 145-input plan](eval-runs/2026-11-15-constrained-extraction-plan.json)
+and [verified metrics and remaining cases](eval-runs/2026-11-15-constrained-extraction-summary.json)
+preserve the separate denominators, hashes and evidence caveats. The fresh set
+was withheld from the implementer until candidate freeze and is now published.
