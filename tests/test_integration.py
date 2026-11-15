@@ -46,11 +46,7 @@ def test_real_dependency_graph_only_sends_after_explicit_review(
             "reply_to": "attacker@example.com",
         }[extra_field]
     response.json.side_effect = [
-        {
-            "message": {
-                "content": '{"segments":[{"kind":"sender_content","quote":"Nie działa komputer"}]}'
-            }
-        },
+        {"message": {"content": '{"issue_quotes":["Nie działa komputer"]}'}},
         *(
             [routing]
             if valid_proposal
@@ -104,7 +100,7 @@ def test_real_dependency_graph_only_sends_after_explicit_review(
     assert http.post.call_count == (2 if valid_proposal else 3)
     extraction = http.post.call_args_list[0].kwargs["json"]
     assert "format" in extraction and "tools" not in extraction
-    assert "segments" in extraction["format"]["properties"]
+    assert "issue_quotes" in extraction["format"]["properties"]
     classification = http.post.call_args_list[1].kwargs["json"]
     assert classification["tools"][0]["function"]["name"] == "propose_route"
     assert set(classification["tools"][0]["function"]["parameters"]["properties"]) == {

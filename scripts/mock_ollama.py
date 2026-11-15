@@ -6,7 +6,7 @@ API for the whole container pipeline to run in CI without pulling a multi-GB mod
 
 - GET  /api/tags  -> reports the configured model as present, so ollama-init's
                      readiness/warmup loop and the API's /ready model check both pass.
-- POST /api/chat  -> partitions the full source or returns one propose_route call
+- POST /api/chat  -> quotes the full source or returns one propose_route call
                      whose category is picked by a small Polish keyword stub.
 
 Because it is deterministic, the CI E2E run proves the *plumbing* (request -> tool
@@ -172,9 +172,7 @@ def build_chat_response(payload: dict[str, Any]) -> dict[str, Any]:
             "model": MODEL,
             "message": {
                 "role": "assistant",
-                "content": json.dumps(
-                    {"segments": [{"kind": "sender_content", "quote": data["message"]}]}
-                ),
+                "content": json.dumps({"issue_quotes": [data["message"]]}),
             },
             "done": True,
         }

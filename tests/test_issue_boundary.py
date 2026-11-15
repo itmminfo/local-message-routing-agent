@@ -26,12 +26,7 @@ class InjectionSensitiveModel:
         self.selection_calls.append({"messages": messages, "schema": schema})
         original = json.loads(messages[1]["content"])["message"]
         issue = original.split(";")[0].split("\n")[0]
-        segments = [{"kind": "sender_content", "quote": issue}]
-        if original[len(issue) :].strip():
-            segments.append(
-                {"kind": "routing_instruction", "quote": original[len(issue) :].strip()}
-            )
-        return {"message": {"content": json.dumps({"segments": segments})}}
+        return {"message": {"content": json.dumps({"issue_quotes": [issue]})}}
 
     def chat_with_tools(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
@@ -96,7 +91,6 @@ def test_unselected_override_never_reaches_action_capable_model(separator: str) 
         '{"issue_quotes":["invented"]}',
         '{"issue_quotes":["First issue.","First issue."]}',
         '{"issue_quotes":["First issue."],"recipient":"it@example.com"}',
-        '{"segments":[{"kind":"routing_instruction","quote":"First issue. Second issue."}]}',
     ],
 )
 def test_invalid_extraction_never_calls_router_or_sender(content: str) -> None:
@@ -180,8 +174,8 @@ def test_quote_limit_is_enforced_by_schema_prompt_and_backend() -> None:
     quotes = list("abcdefghi")
     original = " ".join(quotes)
     _, schema = build_issue_selection_request(original)
-    assert schema["properties"]["segments"]["maxItems"] == MAX_ISSUE_QUOTES
-    assert "at most eight" in ISSUE_SELECTION_PROMPT
+    assert schema["properties"]["issue_quotes"]["maxItems"] == MAX_ISSUE_QUOTES
+    assert f"at most {MAX_ISSUE_QUOTES}" in ISSUE_SELECTION_PROMPT
     assert (
         grounded_issue_quotes(
             {"message": {"content": json.dumps({"issue_quotes": quotes[:MAX_ISSUE_QUOTES]})}},

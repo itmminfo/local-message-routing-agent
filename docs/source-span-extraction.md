@@ -1,5 +1,9 @@
 # Constrained literal issue extraction
 
+This page records the first PR #7 experiment and its remaining failures.
+The [parking checkpoint](extractor-parking-2026-11-15.md) describes the current
+implementation and deferred work. The dated results below remain historical.
+
 The extractor still reads the original message as natural text, without tools
 or a recipient list. Its JSON schema now permits only literal source substrings
 at Unicode word/punctuation boundaries, plus the full original message. The

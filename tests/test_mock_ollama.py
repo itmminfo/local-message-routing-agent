@@ -85,7 +85,7 @@ def test_mock_chat_response_defaults_to_other_for_empty_payload() -> None:
     assert category == RoutingCategory.OTHER.value
 
 
-def test_mock_partition_preserves_entire_source_but_does_not_claim_semantic_extraction() -> None:
+def test_mock_quote_preserves_entire_source_but_does_not_claim_semantic_extraction() -> None:
     import json
 
     module = load_module()
@@ -93,7 +93,5 @@ def test_mock_partition_preserves_entire_source_but_does_not_claim_semantic_extr
     response = module.build_chat_response(
         {"format": {}, "messages": [{"role": "user", "content": json.dumps({"message": original})}]}
     )
-    assert json.loads(response["message"]["content"]) == {
-        "segments": [{"kind": "sender_content", "quote": original}]
-    }
+    assert json.loads(response["message"]["content"]) == {"issue_quotes": [original]}
     assert "tool_calls" not in response["message"]

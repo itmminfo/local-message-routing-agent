@@ -35,17 +35,20 @@ Model może się mylić, także wskazując adres z dozwolonej listy. Wysoki conf
 nie jest miarą poprawności. Akceptacja dotyczy zapisanego oryginału i wybranego
 działu; propozycja nie zmienia ich po zatwierdzeniu.
 
-Pierwszy etap AI dzieli cały oryginał na najwyżej osiem fragmentów treści nadawcy
-i instrukcji dla routera. Backend wymaga dosłownych cytatów, pełnego pokrycia tekstu
-i kolejności źródła. Łączy tylko sąsiadującą treść nadawcy, nigdy przez instrukcję.
-Drugi etap dostaje wyłącznie tę treść i proponuje kategorię przez `propose_route`.
-Backend mapuje kategorię na dozwolony dział; narzędzie modelu nie wysyła poczty.
+Pierwszy etap AI wybiera najwyżej osiem unikalnych cytatów. Schemat dopuszcza
+wyłącznie dosłowne fragmenty źródła oraz cały oryginał. Backend sprawdza ich
+rozłączność, rzeczywiste granice słów i kolejność, a przyjęty tekst kopiuje sam.
+Pusta lub niedokończona odpowiedź daje brak propozycji, bez automatycznego
+ratowania całym wejściem. Limity to 128 jednostek źródła, 3072 bajty kontekstu
+ekstraktora i 1 MiB schematu. Ręczny wybór działu pozostaje dostępny.
 
-Pominięcie tekstu, niedokończona odpowiedź, niepoprawny podział albo brak treści
-nadawcy daje brak propozycji. Rozdzielone powtórzenia identycznego cytatu także
-kończą się odmową. Granice wejścia to 128 jednostek źródła, 3072 bajty kontekstu
-ekstraktora i 1 MiB schematu. Pozostaje ręczny wybór działu, bez automatycznego
-SMTP. Dosłowność i kompletność nie dowodzą trafności etykiet modelu.
+Drugi etap dostaje przyjęte cytaty i proponuje kategorię przez `propose_route`.
+Korzysta z pełnych reguł i przykładów routingu. Backend mapuje kategorię na
+dozwolony dział; narzędzie modelu nie wysyła poczty. Dosłowność cytatu nie dowodzi
+trafności wyboru ani kompletności kontekstu.
+
+Prace nad pozostałymi brakami są [zaparkowane](docs/extractor-parking-2026-11-15.md).
+Nie odebrano jeszcze pełnej jakości tego checkpointu.
 
 Dozwolone działy: `human-resources@example.com`, `kadry@example.com`,
 `help-desk@example.com`, `it@example.com`, `other@example.com`.
