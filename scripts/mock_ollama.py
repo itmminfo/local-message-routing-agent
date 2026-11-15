@@ -6,8 +6,8 @@ API for the whole container pipeline to run in CI without pulling a multi-GB mod
 
 - GET  /api/tags  -> reports the configured model as present, so ollama-init's
                      readiness/warmup loop and the API's /ready model check both pass.
-- POST /api/chat  -> returns a single send_email tool call whose recipient is picked
-                     by a small Polish keyword map over the last user message.
+- POST /api/chat  -> partitions the full source or returns one propose_route call
+                     whose category is picked by a small Polish keyword stub.
 
 Because it is deterministic, the CI E2E run proves the *plumbing* (request -> tool
 call -> validated recipient -> SMTP -> Mailpit, with correct Reply-To and header
@@ -36,6 +36,16 @@ HELP_DESK = "help-desk@example.com"
 IT = "it@example.com"
 KADRY = "kadry@example.com"
 OTHER = "other@example.com"
+
+# Standalone test-only bridge from the pre-existing keyword stub to semantic
+# categories. Production never classifies with these keywords or this mapping.
+MOCK_RECIPIENT_CATEGORIES = {
+    HUMAN_RESOURCES: "people_process",
+    KADRY: "employment_administration",
+    HELP_DESK: "computing_hardware",
+    IT: "software_access",
+    OTHER: "other",
+}
 
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
 PORT = int(os.environ.get("OLLAMA_MOCK_PORT", "11434"))
@@ -162,7 +172,9 @@ def build_chat_response(payload: dict[str, Any]) -> dict[str, Any]:
             "model": MODEL,
             "message": {
                 "role": "assistant",
-                "content": json.dumps({"issue_quotes": [data["message"]]}),
+                "content": json.dumps(
+                    {"segments": [{"kind": "sender_content", "quote": data["message"]}]}
+                ),
             },
             "done": True,
         }
@@ -175,10 +187,10 @@ def build_chat_response(payload: dict[str, Any]) -> dict[str, Any]:
             "tool_calls": [
                 {
                     "function": {
-                        "name": "send_email",
+                        "name": "propose_route",
                         "arguments": {
-                            "recipient": recipient,
-                            "reason": "Mock routing stub (CI): keyword-selected recipient.",
+                            "category": MOCK_RECIPIENT_CATEGORIES[recipient],
+                            "reason": "Atrapa CI: kategorię wybrała mapa słów kluczowych.",
                         },
                     }
                 }

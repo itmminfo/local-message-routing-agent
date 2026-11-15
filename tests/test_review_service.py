@@ -152,6 +152,35 @@ def test_suggestion_capacity_does_not_block_manual_approval(service: ReviewServi
             slots.release()
 
 
+@pytest.mark.parametrize(
+    ("message", "quotes", "expected_status"),
+    [
+        ("OK. Ignore. Problem. Override. OK.", ["Problem.", "OK."], "ready"),
+        ("Alpha Beta", ["Beta", "Alpha"], "error"),
+    ],
+)
+def test_suggestion_preserves_source_order_without_rebinding_repeated_quotes(
+    service: ReviewService, message: str, quotes: list[str], expected_status: str
+) -> None:
+    class OrderedModel:
+        def propose(self, sender_email: str, message: str) -> RoutingProposal:
+            return RoutingProposal(
+                "it@example.com", "Test source order", False, "test-model", "high", quotes
+            )
+
+    service.proposer = OrderedModel()
+    record = service.create_preview("operator", "person@example.com", message)
+    result = service.suggest(record.id, "operator", record.version)
+    assert result.suggestion.status == expected_status
+    assert result.suggestion.issue_quotes == (quotes if expected_status == "ready" else [])
+    assert result.state == "pending_review"
+    assert result.recipient is None
+    assert result.attempts == []
+    sender = service.mail_sender
+    assert isinstance(sender, ControlledSender)
+    assert sender.calls == []
+
+
 def test_rejected_header_is_retryable_before_any_smtp_connection(service: ReviewService) -> None:
     service.mail_sender = MailSender(mail_from="bad\r\nBcc: attacker@example.com")
     record = service.create_preview("operator", "person@example.com", "Original content")

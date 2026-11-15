@@ -1,38 +1,24 @@
 from typing import Any
 
-from app.domain.departments import DepartmentEmail
+from app.domain.departments import RoutingCategory
 
 
-def build_send_email_tool_schema() -> dict[str, Any]:
+def build_propose_route_tool_schema() -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": "send_email",
-            "description": (
-                "Send the user's message to the selected internal department email address."
-            ),
+            "name": "propose_route",
+            "description": "Propose a topic for human review. This tool never sends mail.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "recipient": {
+                    "category": {
                         "type": "string",
-                        "enum": [department.value for department in DepartmentEmail],
-                        "description": (
-                            "Department email address selected from the allowed recipients."
-                        ),
+                        "enum": [category.value for category in RoutingCategory],
                     },
-                    "reason": {
-                        "type": "string",
-                        "description": (
-                            "One short sentence in Polish justifying the chosen recipient."
-                        ),
-                    },
+                    "reason": {"type": "string"},
                 },
-                # The tool contract exposes only the fields the model may decide.
-                # Subject, Reply-To, the body template, and final recipient validation
-                # are handled by the application. Unexpected keys are ignored by
-                # RoutingAgent and logged by name.
-                "required": ["recipient", "reason"],
+                "required": ["category", "reason"],
                 "additionalProperties": False,
             },
         },
