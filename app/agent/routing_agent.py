@@ -6,7 +6,7 @@ from typing import Any, Literal, Protocol
 
 from app.agent.issue_boundary import (
     build_issue_selection_request,
-    grounded_issue_quotes,
+    grounded_issue_selection,
     issue_selection_fingerprint,
 )
 from app.agent.prompts import build_routing_messages, routing_prompt_fingerprint
@@ -108,7 +108,7 @@ class RoutingAgent:
 
         selection_messages, selection_schema = build_issue_selection_request(message)
         selection = self.ollama_client.chat_with_schema(selection_messages, selection_schema)
-        issue_quotes = grounded_issue_quotes(selection, message)
+        issue_quotes = grounded_issue_selection(selection, message)
         issue_text = "\n".join(issue_quotes)
         messages = build_routing_messages(sender_email=sender_email, message=issue_text)
         tools = [build_send_email_tool_schema()]
