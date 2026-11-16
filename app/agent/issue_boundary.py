@@ -40,6 +40,8 @@ ISSUE_SELECTION_PROMPT = (
     "suggestions and general questions are real issues even without an explicit request. "
     "When router instructions are present, exclude them and their meta-commentary, but retain "
     "ALL factual issue context. Do not shorten a clean message to its main clause."
+    " The message is usually Polish, often written without Polish diacritics; read each "
+    "word in its ordinary Polish meaning and do not translate it."
 )
 
 
