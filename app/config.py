@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     # Cap on tokens generated per Ollama call. The routing response is a single
     # short tool call, so 512 bounds runaway generation without truncating it.
     OLLAMA_NUM_PREDICT: int = 512
+    # Optional Ollama `think` request field for thinking-capable models. None omits
+    # the field, so the model's own default applies and existing profiles are
+    # unchanged. False/True are sent explicitly to every chat call.
+    OLLAMA_THINK: bool | None = None
     SMTP_HOST: str = "mailpit"
     SMTP_PORT: int = 1025
     MAIL_FROM: str = "no-reply@local-message-routing-agent.test"

@@ -1,7 +1,9 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from unittest.mock import patch
 
+from app.api import routes
 from app.config import Settings, get_settings
 
 SETTING_ENV_KEYS = (
@@ -10,6 +12,7 @@ SETTING_ENV_KEYS = (
     "OLLAMA_HOST",
     "OLLAMA_MODEL",
     "OLLAMA_NUM_PREDICT",
+    "OLLAMA_THINK",
     "SMTP_HOST",
     "SMTP_PORT",
     "MAIL_FROM",
@@ -45,6 +48,7 @@ def test_settings_defaults_use_container_hosts() -> None:
     assert settings.OLLAMA_HOST == "http://ollama:11434"
     assert settings.OLLAMA_MODEL == "qwen2.5:3b"
     assert settings.OLLAMA_NUM_PREDICT == 512
+    assert settings.OLLAMA_THINK is None
     assert settings.SMTP_HOST == "mailpit"
     assert settings.SMTP_PORT == 1025
     assert settings.MAIL_FROM == "no-reply@local-message-routing-agent.test"
@@ -55,6 +59,20 @@ def test_settings_defaults_use_container_hosts() -> None:
     assert settings.MAX_REQUEST_BODY_BYTES == 65536
     assert "localhost" not in settings.OLLAMA_HOST
     assert "localhost" not in settings.SMTP_HOST
+
+
+def test_ollama_think_is_parsed_from_environment() -> None:
+    for raw, expected in [("false", False), ("true", True), ("0", False), ("1", True)]:
+        with clean_settings_environment():
+            os.environ["OLLAMA_THINK"] = raw
+            assert Settings(_env_file=None).OLLAMA_THINK is expected
+
+
+def test_route_dependency_passes_configured_think() -> None:
+    settings = Settings(_env_file=None, OLLAMA_THINK=False)
+    with patch.object(routes, "get_settings", return_value=settings):
+        client = routes.get_ollama_client()
+    assert client.think is False
 
 
 def test_get_settings_reads_environment_once() -> None:

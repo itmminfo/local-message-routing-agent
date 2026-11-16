@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from app.config import Settings
 from app.infrastructure.ollama_client import (
     OllamaChatError,
     OllamaClient,
@@ -67,6 +68,45 @@ def test_chat_with_tools_posts_non_streaming_tool_chat_request() -> None:
         "options": {"temperature": 0, "num_predict": 64},
     }
     assert result == {"message": {"tool_calls": []}}
+
+
+def _posted_payloads(client: OllamaClient) -> list[dict[str, object]]:
+    response = MagicMock()
+    response.is_success = True
+    response.json.return_value = {"message": {"content": "{}"}}
+    http_client = MagicMock()
+    http_client.post.return_value = response
+    with patch("app.infrastructure.ollama_client.httpx.Client") as client_class:
+        client_class.return_value.__enter__.return_value = http_client
+        client.chat_with_schema([{"role": "user", "content": "x"}], {"type": "object"})
+        client.chat_with_tools([{"role": "user", "content": "x"}], [{"type": "function"}])
+    return [call.kwargs["json"] for call in http_client.post.call_args_list]
+
+
+def test_think_is_omitted_when_not_configured() -> None:
+    settings = Settings(_env_file=None, OLLAMA_THINK=None)
+    with patch("app.infrastructure.ollama_client.get_settings", return_value=settings):
+        payloads = _posted_payloads(OllamaClient(model="qwen3:8b"))
+    assert len(payloads) == 2
+    assert all("think" not in payload for payload in payloads)
+
+
+@pytest.mark.parametrize("think", [False, True])
+def test_explicit_think_is_sent_to_selection_and_classification(think: bool) -> None:
+    settings = Settings(_env_file=None, OLLAMA_THINK=None)
+    with patch("app.infrastructure.ollama_client.get_settings", return_value=settings):
+        payloads = _posted_payloads(OllamaClient(model="qwen3:8b", num_predict=512, think=think))
+    assert [payload["think"] for payload in payloads] == [think, think]
+    assert all(payload["options"] == {"temperature": 0, "num_predict": 512} for payload in payloads)
+    assert "format" in payloads[0] and "tools" not in payloads[0]
+    assert "tools" in payloads[1] and "format" not in payloads[1]
+
+
+def test_configured_think_is_used_when_client_has_no_override() -> None:
+    settings = Settings(_env_file=None, OLLAMA_THINK=False)
+    with patch("app.infrastructure.ollama_client.get_settings", return_value=settings):
+        payloads = _posted_payloads(OllamaClient(model="qwen3:8b"))
+    assert [payload["think"] for payload in payloads] == [False, False]
 
 
 def test_chat_with_tools_raises_unavailable_on_transport_error() -> None:

@@ -30,12 +30,14 @@ class OllamaClient:
         model: str | None = None,
         timeout_seconds: int | None = None,
         num_predict: int | None = None,
+        think: bool | None = None,
     ) -> None:
         settings = get_settings()
         self.host = (host or settings.OLLAMA_HOST).rstrip("/")
         self.model = model or settings.OLLAMA_MODEL
         self.timeout_seconds = timeout_seconds or settings.REQUEST_TIMEOUT_SECONDS
         self.num_predict = num_predict or settings.OLLAMA_NUM_PREDICT
+        self.think = settings.OLLAMA_THINK if think is None else think
 
     def chat_with_tools(
         self,
@@ -69,6 +71,10 @@ class OllamaClient:
         )
 
     def _chat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # An explicit think value is sent to both selection and classification calls;
+        # None keeps the request unchanged so the model's default applies.
+        if self.think is not None:
+            payload = {**payload, "think": self.think}
 
         # Network-level retries/backoff are intentionally omitted in this PoC: a
         # transient transport error surfaces as HTTP 503 and the caller can retry.

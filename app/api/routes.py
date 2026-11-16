@@ -42,6 +42,7 @@ def get_ollama_client() -> OllamaClient:
         model=settings.OLLAMA_MODEL,
         timeout_seconds=settings.REQUEST_TIMEOUT_SECONDS,
         num_predict=settings.OLLAMA_NUM_PREDICT,
+        think=settings.OLLAMA_THINK,
     )
 
 
