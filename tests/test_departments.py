@@ -1,7 +1,10 @@
 import pytest
 from app.domain.departments import (
     ALLOWED_RECIPIENTS,
+    CATEGORY_DESCRIPTIONS,
+    CATEGORY_RECIPIENTS,
     DepartmentEmail,
+    RoutingCategory,
     validate_department_email,
 )
 from app.domain.routing_policy import (
@@ -19,6 +22,33 @@ EXPECTED_RECIPIENTS = frozenset(
         "other@example.com",
     }
 )
+
+
+def test_semantic_categories_map_exactly_to_existing_five_recipients() -> None:
+    assert {
+        category.value: recipient.value for category, recipient in CATEGORY_RECIPIENTS.items()
+    } == {
+        "people_process": "human-resources@example.com",
+        "employment_administration": "kadry@example.com",
+        "computing_hardware": "help-desk@example.com",
+        "software_access": "it@example.com",
+        "office_facilities": "other@example.com",
+        "other": "other@example.com",
+    }
+    assert set(CATEGORY_DESCRIPTIONS) == set(CATEGORY_RECIPIENTS) == set(RoutingCategory)
+    assert set(CATEGORY_RECIPIENTS.values()) == EXPECTED_RECIPIENTS
+
+
+def test_semantic_category_boundary_is_positive_for_facilities_and_computing_only() -> None:
+    assert "non-computing devices" in CATEGORY_DESCRIPTIONS[RoutingCategory.OFFICE_FACILITIES]
+    assert (
+        "physical computers and computing peripherals only"
+        in CATEGORY_DESCRIPTIONS[RoutingCategory.COMPUTING_HARDWARE]
+    )
+    assert (
+        "formal category takes precedence"
+        in CATEGORY_DESCRIPTIONS[RoutingCategory.EMPLOYMENT_ADMINISTRATION]
+    )
 
 
 def test_department_email_enum_has_exact_allowed_recipients() -> None:

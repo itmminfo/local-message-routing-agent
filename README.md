@@ -35,10 +35,20 @@ Model może się mylić, także wskazując adres z dozwolonej listy. Wysoki conf
 nie jest miarą poprawności. Akceptacja dotyczy zapisanego oryginału i wybranego
 działu; propozycja nie zmienia ich po zatwierdzeniu.
 
-Ekstrakcja przyjmuje najwyżej osiem unikalnych cytatów. Backend znajduje ich
-dosłowne, rozłączne wystąpienia, także przy powtarzających się frazach, i układa je
-w kolejności źródła. Brak poprawnego przypisania daje brak propozycji, bez SMTP.
-Ten limit ogranicza koszt walidacji; nie stanowi dowodu trafności wyboru modelu.
+Pierwszy etap AI wybiera najwyżej osiem unikalnych cytatów. Schemat dopuszcza
+wyłącznie dosłowne fragmenty źródła oraz cały oryginał. Backend sprawdza ich
+rozłączność, rzeczywiste granice słów i kolejność, a przyjęty tekst kopiuje sam.
+Pusta lub niedokończona odpowiedź daje brak propozycji, bez automatycznego
+ratowania całym wejściem. Limity to 128 jednostek źródła, 3072 bajty kontekstu
+ekstraktora i 1 MiB schematu. Ręczny wybór działu pozostaje dostępny.
+
+Drugi etap dostaje przyjęte cytaty i proponuje kategorię przez `propose_route`.
+Korzysta z pełnych reguł i przykładów routingu. Backend mapuje kategorię na
+dozwolony dział; narzędzie modelu nie wysyła poczty. Dosłowność cytatu nie dowodzi
+trafności wyboru ani kompletności kontekstu.
+
+Prace nad pozostałymi brakami są [zaparkowane](docs/extractor-parking-2026-11-15.md).
+Nie odebrano jeszcze pełnej jakości tego checkpointu.
 
 Dozwolone działy: `human-resources@example.com`, `kadry@example.com`,
 `help-desk@example.com`, `it@example.com`, `other@example.com`.

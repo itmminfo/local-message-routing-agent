@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Protocol
 
-from app.agent.issue_boundary import grounded_issue_quotes
+from app.agent.issue_boundary import grounded_ordered_issue_quotes
 from app.agent.routing_agent import RoutingProposal
 from app.config import get_settings
 from app.infrastructure.mail_sender import LocalMailpitRequired, MailDeliveryError
@@ -65,7 +65,7 @@ class ReviewService:
             )
         try:
             proposal = self.proposer.propose(record.email, record.message)
-            quotes = grounded_issue_quotes(
+            quotes = grounded_ordered_issue_quotes(
                 {"message": {"content": json.dumps({"issue_quotes": proposal.issue_quotes})}},
                 record.message,
             )

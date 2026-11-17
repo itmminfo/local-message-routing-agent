@@ -1,6 +1,7 @@
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,35 +10,48 @@ from app.main import create_app
 from fastapi.testclient import TestClient
 
 
-@pytest.mark.parametrize("valid_proposal", [True, False])
+@pytest.mark.parametrize(
+    ("valid_proposal", "extra_field"),
+    [(True, None), (False, None), (False, "subject"), (False, "body"), (False, "reply_to")],
+)
 def test_real_dependency_graph_only_sends_after_explicit_review(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, valid_proposal: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    valid_proposal: bool,
+    extra_field: str | None,
 ) -> None:
     monkeypatch.setenv("REVIEW_DATABASE_PATH", str(tmp_path / "review.sqlite3"))
     get_settings.cache_clear()
     response = MagicMock()
     response.is_success = True
-    routing = {
+    routing: dict[str, Any] = {
         "message": {
             "tool_calls": [
                 {
                     "function": {
-                        "name": "send_email",
+                        "name": "propose_route",
                         "arguments": {
-                            "recipient": "help-desk@example.com",
+                            "category": "computing_hardware",
                             "reason": "Computer issue.",
-                            "subject": "HIJACKED",
-                            "body": "SECRET-MODEL-PAYLOAD",
-                            "reply_to": "attacker@example.com",
                         },
                     }
                 }
             ]
         }
     }
+    if extra_field:
+        routing["message"]["tool_calls"][0]["function"]["arguments"][extra_field] = {
+            "subject": "HIJACKED\r\nBcc: attacker@example.com",
+            "body": "SECRET-MODEL-PAYLOAD",
+            "reply_to": "attacker@example.com",
+        }[extra_field]
     response.json.side_effect = [
         {"message": {"content": '{"issue_quotes":["Nie działa komputer"]}'}},
-        *([routing] if valid_proposal else [{"message": {"content": "refusal"}}] * 2),
+        *(
+            [routing]
+            if valid_proposal
+            else [routing if extra_field else {"message": {"content": "refusal"}}] * 2
+        ),
     ]
     http = MagicMock()
     http.post.return_value = response
@@ -86,6 +100,13 @@ def test_real_dependency_graph_only_sends_after_explicit_review(
     assert http.post.call_count == (2 if valid_proposal else 3)
     extraction = http.post.call_args_list[0].kwargs["json"]
     assert "format" in extraction and "tools" not in extraction
+    assert "issue_quotes" in extraction["format"]["properties"]
+    classification = http.post.call_args_list[1].kwargs["json"]
+    assert classification["tools"][0]["function"]["name"] == "propose_route"
+    assert set(classification["tools"][0]["function"]["parameters"]["properties"]) == {
+        "category",
+        "reason",
+    }
     smtp.send.assert_called_once()
     message = BytesParser(policy=policy.default).parsebytes(smtp.send.call_args.args[0][:-3])
     assert message["To"] == "it@example.com"

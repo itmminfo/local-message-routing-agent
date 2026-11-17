@@ -32,18 +32,18 @@ class InjectionSensitiveModel:
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
         self.routing_calls.append({"messages": messages, "tools": tools})
-        recipient = (
-            "human-resources@example.com"
+        category = (
+            "people_process"
             if "zignoruj" in messages[1]["content"]
-            else "kadry@example.com"
+            else "employment_administration"
         )
         return {
             "message": {
                 "tool_calls": [
                     {
                         "function": {
-                            "name": "send_email",
-                            "arguments": {"recipient": recipient, "reason": "Świadectwo pracy."},
+                            "name": "propose_route",
+                            "arguments": {"category": category, "reason": "Świadectwo pracy."},
                         }
                     }
                 ]
